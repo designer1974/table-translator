@@ -1,0 +1,23 @@
+name: table_translator
+description: Traduttore vocale per camerieri - arabo, italiano, inglese, francese, tedesco, spagnolo. Gratis e offline.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  speech_to_text: any
+  google_mlkit_translation: any
+  google_mlkit_language_id: any
+  flutter_tts: any
+  shared_preferences: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

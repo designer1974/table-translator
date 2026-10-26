@@ -1,0 +1,46 @@
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Impostazioni salvate sul telefono.
+class Prefs extends ChangeNotifier {
+  String waiter = 'it';
+  String tourist = 'en';
+  bool autoSpeak = true;
+  bool flip = true; // metà del turista capovolta
+  double textScale = 1.0;
+  double rate = 0.48;
+  Map<String, String> voices = {}; // lingua -> "nome|locale"
+
+  static Future<Prefs> load() async {
+    final p = await SharedPreferences.getInstance();
+    final x = Prefs()
+      ..waiter = p.getString('waiter') ?? 'it'
+      ..tourist = p.getString('tourist') ?? 'en'
+      ..autoSpeak = p.getBool('autoSpeak') ?? true
+      ..flip = p.getBool('flip') ?? true
+      ..textScale = p.getDouble('textScale') ?? 1.0
+      ..rate = p.getDouble('rate') ?? 0.48;
+    for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
+      x.voices[k.substring(6)] = p.getString(k) ?? '';
+    }
+    return x;
+  }
+
+  Future<void> save() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('waiter', waiter);
+    await p.setString('tourist', tourist);
+    await p.setBool('autoSpeak', autoSpeak);
+    await p.setBool('flip', flip);
+    await p.setDouble('textScale', textScale);
+    await p.setDouble('rate', rate);
+    for (final e in voices.entries) {
+      if (e.value.isEmpty) {
+        await p.remove('voice_${e.key}');
+      } else {
+        await p.setString('voice_${e.key}', e.value);
+      }
+    }
+    notifyListeners();
+  }
+}

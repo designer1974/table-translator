@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Prepara progetto Android
+        run: |
+          flutter create --platforms=android --org com.designer1974 --project-name table_translator .
+          rm -f test/widget_test.dart
+          for f in android/app/build.gradle.kts android/app/build.gradle; do
+            [ -f "$f" ] && sed -i -E 's/minSdk( =|Version)? *flutter\.minSdkVersion/minSdk = 24/' "$f" && grep -n "minSdk" "$f" || true
+          done
+
+      - run: flutter pub get
+
+      - name: Controllo codice
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Test
+        run: flutter test
+
+      # Un APK per tipo di processore: molto più leggero
+      - name: Compila APK
+        run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm
+
+      - name: Rinomina APK
+        run: |
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk TableTranslator.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk TableTranslator-telefoni-vecchi.apk
+          ls -la *.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Table Translator build ${{ github.run_number }}
+          body: |
+            **TableTranslator.apk** → per quasi tutti i telefoni (anche Huawei P30 Lite).
+            TableTranslator-telefoni-vecchi.apk → solo per telefoni molto vecchi a 32 bit.
+          files: |
+            TableTranslator.apk
+            TableTranslator-telefoni-vecchi.apk
+          make_latest: true
