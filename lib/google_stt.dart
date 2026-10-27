@@ -16,7 +16,7 @@ class GoogleStt {
   bool _active = false;
 
   /// Silenzio dopo l'ultima parola che chiude la frase.
-  Duration pause = const Duration(milliseconds: 1000);
+  Duration pause = const Duration(milliseconds: 600);
 
   void Function()? onReady;
   void Function()? onBegin;
@@ -68,14 +68,10 @@ class GoogleStt {
   void _armSilence() {
     _silence?.cancel();
     _silence = Timer(pause, () {
-      if (_active && _partial.isNotEmpty) _m.invokeMethod('stop');
-      // se il servizio non risponde, chiudi comunque
-      Timer(const Duration(milliseconds: 1500), () {
-        if (_active && _partial.isNotEmpty) {
-          _m.invokeMethod('cancel');
-          _finish(_partial);
-        }
-      });
+      if (_active && _partial.isNotEmpty) {
+        _m.invokeMethod('cancel');
+        _finish(_partial);
+      }
     });
   }
 

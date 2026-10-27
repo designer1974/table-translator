@@ -36,6 +36,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   final _voice = Voice();
   final _g = GoogleStt(); // riconoscimento vocale veloce
   String _live = ''; // testo che arriva mentre la persona parla
+  String _liveTr = ''; // la sua traduzione, in diretta
+  String _trKey = ''; // "da>a|testo" dell'ultima traduzione in diretta
+  int _trSeq = 0;
 
   final _msgs = <Msg>[];
   final _text = TextEditingController();
@@ -78,6 +81,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
             _live = t;
             _mode = OrbMode.hearing;
           });
+          _translateLive(t);
         }
       }
       ..onFinal = _onText
@@ -198,6 +202,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _mode = OrbMode.listening;
       _level = 0;
       _live = '';
+      _liveTr = '';
+      _trKey = '';
     });
     _g
         .start(langOf(_lang(_turn)).speech,
@@ -208,6 +214,23 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   }
 
   void _pauseListening() => _g.cancel();
+
+  /// Traduce mentre la persona parla: alla fine la traduzione è già pronta.
+  Future<void> _translateLive(String t) async {
+    final from = _g.detected == _lang(_other(_turn))
+        ? _lang(_other(_turn))
+        : _lang(_turn);
+    final to = from == p.waiter ? p.tourist : p.waiter;
+    final seq = ++_trSeq;
+    try {
+      final out = await _tr.translate(t, from, to);
+      if (!mounted || seq != _trSeq || _live != t) return;
+      setState(() {
+        _liveTr = out;
+        _trKey = '$from>$to|$t';
+      });
+    } catch (_) {}
+  }
 
   /// Testo riconosciuto (modalità veloce).
   Future<void> _onText(String text) async {
@@ -257,7 +280,10 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     final warm = _voice.prepare(langOf(to));
     String out;
     try {
-      out = await _tr.translate(text, from, to);
+      // già tradotta in diretta? allora parte subito
+      out = _trKey == '$from>$to|$text' && _liveTr.isNotEmpty
+          ? _liveTr
+          : await _tr.translate(text, from, to);
       // traduzione uguale all'originale = lingua sbagliata: prova l'altro verso
       if (sameText(out, text)) {
         final back = await _tr.translate(text, to, from);
@@ -403,61 +429,6 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _phrases() async {
-    final phrase = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: C.bgTop,
-      showDragHandle: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        maxChildSize: 0.95,
-        builder: (ctx, sc) => ListView(
-          controller: sc,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          children: [
-            Text('Frasi pronte → ${langOf(p.tourist).flag}',
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-            for (final e in quickPhrases.entries) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 16, bottom: 8),
-                child: Text(e.key.toUpperCase(),
-                    style: const TextStyle(
-                        color: C.muted,
-                        letterSpacing: 1.2,
-                        fontWeight: FontWeight.w600)),
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final f in e.value)
-                    ActionChip(
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: C.border),
-                      label: Text(f, style: const TextStyle(fontSize: 15)),
-                      onPressed: () => Navigator.pop(ctx, f),
-                    ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-    if (phrase == null) return;
-    _pauseListening();
-    if (p.waiter == 'it') {
-      await _deliver(Side.waiter, phrase, 'it');
-    } else {
-      // frasi scritte in italiano: prima nella lingua del cameriere
-      final w = await _tr.translate(phrase, 'it', p.waiter);
-      await _deliver(Side.waiter, w, p.waiter);
-    }
-  }
-
   void _history() {
     showModalBottomSheet(
       context: context,
@@ -582,6 +553,18 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
             ]),
           ),
           const SizedBox(height: 10),
+          if (_liveTr.isNotEmpty && _live.isNotEmpty && p.showText)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '${langOf(_trKey.split('|').first.split('>').last).flag}  $_liveTr',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w700, color: color),
+              ),
+            ),
           Text(
             big,
             maxLines: 3,
@@ -619,8 +602,6 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                   children: [
                     _roundBtn(Icons.chat_bubble_outline_rounded, _history),
                     const Spacer(),
-                    _roundBtn(Icons.bolt_rounded, _phrases),
-                    const SizedBox(width: 10),
                     _roundBtn(Icons.tune_rounded, _openSettings),
                   ],
                 ),

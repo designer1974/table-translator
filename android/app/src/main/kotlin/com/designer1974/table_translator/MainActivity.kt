@@ -126,12 +126,16 @@ class MainActivity : FlutterActivity() {
             if (other != null) putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(other))
             // Android 14+: riconosce da solo quale delle due lingue si parla
             val both = arrayListOf(lang).apply { if (other != null) add(other) }
+            // (non per la darija: il servizio di rilevamento non la supporta)
+            if (other != null && !lang.startsWith("ar") && !other.startsWith("ar")) {
             putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true)
             putStringArrayListExtra("android.speech.extra.LANGUAGE_DETECTION_ALLOWED_LANGUAGES", both)
             putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "balanced")
             putStringArrayListExtra("android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES", both)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
+            }
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 600L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 500L)
+            putExtra("android.speech.extra.PREFER_OFFLINE", false)
         }
         val r = ensure()
         r.cancel()

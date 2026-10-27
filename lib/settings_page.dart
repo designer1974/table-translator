@@ -15,6 +15,13 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
+const _sample = {
+  'it': 'Ciao! Come posso aiutarti?',
+  'en': 'Hello! How can I help you?',
+  'es': '¡Hola! ¿Cómo puedo ayudarte?',
+  'ar': 'السلام! كيفاش نقدر نعاونك؟',
+};
+
 class _SettingsPageState extends State<SettingsPage> {
   Prefs get p => widget.prefs;
 
@@ -29,9 +36,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ..pitch = p.pitch
       ..male = p.male
       ..reset();
-    await v.speak('Buongiorno, benvenuti! Cosa vi porto da bere?', langOf('it'));
-    await v.speak('Good evening, welcome! What can I get you to drink?',
-        langOf('en'));
+    await v.speak('Ciao! Come posso aiutarti?', langOf(p.waiter));
+    await v.speak(_sample[p.tourist] ?? 'Hello! How can I help you?',
+        langOf(p.tourist));
     if (mounted) setState(() {});
   }
 
@@ -82,6 +89,16 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChanged: (v) => setState(() => p.rate = v),
                     onChangeEnd: (_) => p.save(),
                   ),
+                  Text('Risposta dopo la pausa  ·  ${p.pauseSec.toStringAsFixed(1)} s'
+                      '${p.pauseSec <= 0.6 ? '  (rapidissima)' : ''}'),
+                  Slider(
+                    value: p.pauseSec,
+                    min: 0.4,
+                    max: 1.5,
+                    divisions: 11,
+                    onChanged: (v) => setState(() => p.pauseSec = v),
+                    onChangeEnd: (_) => p.save(),
+                  ),
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -112,15 +129,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ]),
             ),
-            if (widget.voice.hasOfflineVoice('en') == false) ...[
+            if (widget.voice.hasOfflineVoice(p.tourist) == false) ...[
               const SizedBox(height: 16),
               GlossCard(
                 padding: const EdgeInsets.all(16),
-                child: const Text(
-                  '⚠️ La voce inglese non è installata sul telefono: parla in '
-                  'ritardo perché la scarica ogni volta. Vai in Impostazioni '
-                  'del telefono › Sintesi vocale › Motore Google › Installa '
-                  'dati vocali › English (UK) e scaricala.',
+                child: Text(
+                  '⚠️ La voce ${langOf(p.tourist).nameIt} non è installata sul '
+                  'telefono: parla in ritardo perché la scarica ogni volta. Vai '
+                  'in Impostazioni del telefono › Sintesi vocale › Motore Google '
+                  '› Installa dati vocali e scarica '
+                  '${p.tourist == 'ar' ? 'Arabo' : langOf(p.tourist).nameIt}.',
                   style: TextStyle(fontSize: 14),
                 ),
               ),

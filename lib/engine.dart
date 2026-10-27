@@ -85,13 +85,24 @@ const _common = <String, Set<String>>{
     'us', 'me', 'card', 'pay', 'cash', 'people', 'outside', 'inside',
     'right', 'no', 'not', 'any', 'free', 'still', 'sparkling', 'which',
   },
+  'es': {
+    'el', 'los', 'las', 'de', 'que', 'y', 'es', 'por', 'para', 'con',
+    'sin', 'una', 'gracias', 'hola', 'buenos', 'buenas', 'días', 'dias',
+    'tardes', 'noches', 'sí', 'por favor', 'favor', 'quiero', 'puedo',
+    'puede', 'dónde', 'donde', 'cuánto', 'cuanto', 'cuesta', 'está',
+    'esta', 'estoy', 'muy', 'bien', 'vale', 'claro', 'también', 'pero',
+    'porque', 'cómo', 'como', 'qué', 'yo', 'tú', 'usted', 'nosotros',
+    'tengo', 'tiene', 'hay', 'aquí', 'allí', 'ahora', 'mañana', 'hoy',
+    'perdón', 'disculpe', 'necesito', 'agua', 'del', 'al', 'lo', 'me',
+    'te', 'se', 'nos', 'mi', 'su', 'mucho', 'poco', 'nada', 'todo',
+  },
   'it': {
     'il', 'lo', 'la', 'gli', 'le', 'di', 'che', 'non', 'è', 'e', 'sono',
     'per', 'un', 'una', 'uno', 'ciao', 'grazie', 'prego', 'buongiorno',
     'buonasera', 'sì', 'si', 'vorrei', 'posso', 'puoi', 'può', 'dove',
     'quanto', 'quanti', 'conto', 'acqua', 'tavolo', 'bene', 'molto',
     'con', 'senza', 'del', 'della', 'dei', 'questo', 'questa', 'quello',
-    'mi', 'ti', 'ci', 'vi', 'anche', 'ma', 'perché', 'come', 'cosa',
+    'ti', 'ci', 'vi', 'anche', 'ma', 'perché', 'cosa',
     'volete', 'vuole', 'avete', 'abbiamo', 'subito', 'arrivo', 'scusi',
     'scusa', 'certo', 'va', 'tutto', 'piatto', 'vino', 'birra', 'caffè',
     'due', 'tre', 'persone', 'fuori', 'dentro', 'naturale', 'frizzante',
@@ -108,6 +119,13 @@ class Detector {
   Future<String> pick(String text, String a, String b, String fallback,
       {String? hint}) async {
     final score = {a: 0.0, b: 0.0};
+    // scrittura araba: è la darija (l'altra lingua usa le lettere latine)
+    if (score.containsKey('ar')) {
+      final arab = RegExp(r'[\u0600-\u06FF]').allMatches(text).length;
+      final latin = RegExp(r'[A-Za-zÀ-ÿ]').allMatches(text).length;
+      if (arab > latin) return 'ar';
+      if (latin > 0 && arab == 0) return a == 'ar' ? b : a;
+    }
     if (hint != null && score.containsKey(hint)) score[hint] = 0.35;
     try {
       for (final l in await _id.identifyPossibleLanguages(text)) {
