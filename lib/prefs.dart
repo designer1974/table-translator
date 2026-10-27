@@ -9,8 +9,10 @@ class Prefs extends ChangeNotifier {
   bool flip = false; // (non più usato)
   double pauseSec = 2.0; // silenzio che chiude la frase
   String stt = 'balanced'; // qualità Whisper
+  String engine = 'google'; // 'google' (veloce) o 'whisper' (offline)
   double textScale = 1.0;
   double rate = 0.48;
+  double pitch = 1.0;
   Map<String, String> voices = {}; // lingua -> "nome|locale"
 
   static Future<Prefs> load() async {
@@ -21,8 +23,10 @@ class Prefs extends ChangeNotifier {
       ..autoSpeak = p.getBool('autoSpeak') ?? true
       ..pauseSec = p.getDouble('pauseSec') ?? 2.0
       ..stt = p.getString('stt') ?? 'balanced'
+      ..engine = p.getString('engine') ?? 'google'
       ..textScale = p.getDouble('textScale') ?? 1.0
-      ..rate = p.getDouble('rate') ?? 0.48;
+      ..rate = p.getDouble('rate') ?? 0.48
+      ..pitch = p.getDouble('pitch') ?? 1.0;
     for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
       x.voices[k.substring(6)] = p.getString(k) ?? '';
     }
@@ -36,8 +40,10 @@ class Prefs extends ChangeNotifier {
     await p.setBool('autoSpeak', autoSpeak);
     await p.setDouble('pauseSec', pauseSec);
     await p.setString('stt', stt);
+    await p.setString('engine', engine);
     await p.setDouble('textScale', textScale);
     await p.setDouble('rate', rate);
+    await p.setDouble('pitch', pitch);
     for (final e in voices.entries) {
       if (e.value.isEmpty) {
         await p.remove('voice_${e.key}');

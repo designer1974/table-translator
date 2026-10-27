@@ -100,6 +100,7 @@ class Voice {
   final _tts = FlutterTts();
   final Map<String, Map<String, String>> chosen = {}; // lingua -> voce
   double rate = 0.48;
+  double pitch = 1.0;
 
   Future<void> init() async {
     try {
@@ -168,6 +169,7 @@ class Voice {
       }
     }
     await _tts.setSpeechRate(rate);
+    await _tts.setPitch(pitch);
     await _tts.speak(text);
   }
 
@@ -190,6 +192,8 @@ class Ear {
   void Function(Uint8List pcm)? onUtterance;
 
   bool get open => _sub != null;
+
+  Future<bool> permission() => _rec.hasPermission();
   bool get listening => open && !_paused;
 
   Future<bool> start() async {

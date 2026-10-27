@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'engine.dart';
+import 'google_stt.dart';
 import 'langs.dart';
 import 'orb.dart';
 import 'prefs.dart';
@@ -36,6 +37,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   final _voice = Voice();
   final _ear = Ear();
   late Stt _stt;
+  final _g = GoogleStt(); // riconoscimento veloce (predefinito)
+  bool get _fast => p.engine != 'whisper';
+  String _live = ''; // testo che arriva mentre la persona parla
 
   final _msgs = <Msg>[];
   final _text = TextEditingController();
@@ -65,13 +69,51 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         if (mounted) setState(() => _mode = OrbMode.hearing);
       }
       ..onUtterance = _onUtterance;
-  }
+    _g
+      ..onReady = () {
+        if (mounted && _running) setState(() => _mode = OrbMode.listening);
+      }
+      ..onBegin = () {
+        if (mounted && _running) setState(() => _mode = OrbMode.hearing);
+      }
+      ..onLevel = (v) {
+        if (mounted &&
+            (_mode == OrbMode.listening || _mode == OrbMode.hearing)) {
+          setState(() => _level = v);
+        }
+      }
+      ..onPartial = (t) {
+        if (mounted && _running) {
+          setState(() {
+            _live = t;
+            _mode = OrbMode.hearing;
+          });
+        }
+      }
+      ..onFinal = (t) => _onText(t)
+      ..onError = (code) {
+        if (!mounted || !_running) return;
+        if (code == 6 || code == 7) {
+          // nessuno ha parlato: continua ad ascoltare
+          Future.delayed(const Duration(milliseconds: 250), _listen);
+          return;
+        }
+        if (code == 8 || code == 5 || code == 11) {
+          Future.delayed(const Duration(milliseconds: 700), _listen);
+          return;
+        }
+        setState(() {
+          _mode = OrbMode.paused;
+          _hint = sttErrorText(code);
+        });
+      };
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     p.removeListener(_applyPrefs);
     _ear.dispose();
+    _g.dispose();
     _voice.stop();
     _tr.dispose();
     _det.dispose();
@@ -88,6 +130,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   void _applyPrefs() {
     _voice.rate = p.rate;
+    _voice.pitch = p.pitch;
     _voice.chosen.clear();
     p.voices.forEach((k, v) {
       final parts = v.split('|');
@@ -96,6 +139,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       }
     });
     _ear.vad.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
+    _g.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
     final q = SttQuality.values
         .firstWhere((x) => x.name == p.stt, orElse: () => SttQuality.balanced);
     if (q != _stt.quality) {
@@ -115,25 +159,53 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   // ---------------- conversazione ----------------
 
   Future<void> _start() async {
-    if (!await _stt.hasModel()) {
-      _snack('Scarica prima il riconoscimento voce in Impostazioni › Lingue');
-      return;
-    }
-    final ok = await _ear.start();
-    if (!ok) {
+    if (!await _ear.permission()) {
       _snack('Serve il permesso del microfono');
       return;
+    }
+    if (_fast) {
+      final info = await _g.info();
+      if (info['available'] != true || info['using'] == null) {
+        if (mounted) _noGoogleDialog();
+        return;
+      }
+    } else {
+      if (!await _stt.hasModel()) {
+        _snack('Scarica prima il riconoscimento offline in Impostazioni');
+        return;
+      }
+      if (!await _ear.start()) return;
+      _ear.pause();
     }
     WakelockPlus.enable();
     HapticFeedback.mediumImpact();
     setState(() {
       _running = true;
-      _mode = OrbMode.listening;
       _hint = null;
     });
+    _listen();
+  }
+
+  void _noGoogleDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Riconoscimento vocale non trovato'),
+        content: const Text(
+          'Per la modalità veloce serve l\'app "Google" sul telefono '
+          '(dal Play Store). Puoi anche usare la modalità offline '
+          '(più lenta) in Impostazioni.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
+      ),
+    );
   }
 
   Future<void> _stop() async {
+    await _g.cancel();
     await _ear.close();
     await _voice.stop();
     WakelockPlus.disable();
@@ -142,17 +214,45 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         _running = false;
         _mode = OrbMode.idle;
         _level = 0;
+        _live = '';
       });
     }
   }
 
   void _listen() {
-    if (!_running) return;
-    _ear.resume();
+    if (!_running || !mounted) return;
     setState(() {
       _mode = OrbMode.listening;
       _level = 0;
+      _live = '';
     });
+    if (_fast) {
+      _g.start(langOf(_lang(_turn)).speech).catchError((e) {
+        if (mounted) setState(() => _hint = 'Errore: $e');
+      });
+    } else {
+      _ear.resume();
+    }
+  }
+
+  void _pauseListening() {
+    if (_fast) {
+      _g.cancel();
+    } else {
+      _ear.pause();
+    }
+  }
+
+  /// Testo riconosciuto (modalità veloce).
+  Future<void> _onText(String text) async {
+    if (!mounted || !_running) return;
+    final side = _turn;
+    if (text.trim().isEmpty) {
+      setState(() => _hint = ui(_lang(side), 'again'));
+      _listen();
+      return;
+    }
+    await _deliver(side, text, _lang(side));
   }
 
   Future<void> _onOrbTap() async {
@@ -161,8 +261,11 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         await _start();
       case OrbMode.listening:
       case OrbMode.hearing:
-        _ear.pause();
-        setState(() => _mode = OrbMode.paused);
+        _pauseListening();
+        setState(() {
+          _mode = OrbMode.paused;
+          _live = '';
+        });
       case OrbMode.paused:
         _listen();
       case OrbMode.speaking:
@@ -201,6 +304,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     setState(() {
       _mode = OrbMode.thinking;
       _hint = null;
+      _live = text;
     });
     String out;
     try {
@@ -215,6 +319,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _msgs.add(Msg(fromSide, from, to, text, out));
       _turn = _other(fromSide); // ora tocca all'altra persona
       _mode = OrbMode.speaking;
+      _live = '';
     });
     if (p.autoSpeak) {
       try {
@@ -234,7 +339,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     if (t.isEmpty) return;
     _text.clear();
     FocusScope.of(context).unfocus();
-    _ear.pause();
+    _pauseListening();
     // rileva la lingua scritta: decide la direzione
     final d = await _det.detect(t);
     final from = (d == p.tourist || d == p.waiter) ? d! : _lang(_turn);
@@ -247,7 +352,10 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _turn = _other(_turn);
       _hint = null;
     });
-    if (_mode == OrbMode.hearing) _listen();
+    if (_running && (_mode == OrbMode.hearing || _mode == OrbMode.listening)) {
+      _pauseListening();
+      _listen();
+    }
   }
 
   Future<void> _pickLang(Side side) async {
@@ -362,7 +470,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       ),
     );
     if (phrase == null) return;
-    _ear.pause();
+    _pauseListening();
     if (p.waiter == 'it') {
       await _deliver(Side.waiter, phrase, 'it');
     } else {
@@ -437,18 +545,83 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   // ---------------- interfaccia ----------------
 
-  String _status() {
-    final code = _lang(_turn);
+  /// Etichetta di stato: sempre chiaro se sta ascoltando o no.
+  (IconData, String, Color) _badge(Color color) {
+    final l = langOf(_lang(_turn));
     return switch (_mode) {
-      OrbMode.idle => _msgs.isEmpty
-          ? 'Tocca la sfera per iniziare'
-          : 'Tocca la sfera per continuare',
-      OrbMode.listening => ui(code, 'speak'),
-      OrbMode.hearing => ui(code, 'listening'),
-      OrbMode.thinking => '…',
-      OrbMode.speaking => '🔊',
-      OrbMode.paused => 'In pausa · tocca per riprendere',
+      OrbMode.idle => (Icons.play_arrow_rounded, 'TOCCA PER INIZIARE', C.muted),
+      OrbMode.listening => (Icons.mic_rounded, 'IN ASCOLTO · ${l.nameIt.toUpperCase()}', C.listening),
+      OrbMode.hearing => (Icons.graphic_eq_rounded, 'TI SENTO…', C.listening),
+      OrbMode.thinking => (Icons.translate_rounded, 'TRADUCO…', color),
+      OrbMode.speaking => (Icons.volume_up_rounded, 'LEGGO LA TRADUZIONE', color),
+      OrbMode.paused => (Icons.pause_rounded, 'IN PAUSA · TOCCA LA SFERA', C.muted),
     };
+  }
+
+  Widget _statusArea(Color color) {
+    final (icon, label, c) = _badge(color);
+    final l = langOf(_lang(_turn));
+    final big = _live.isNotEmpty
+        ? _live
+        : _hint ??
+            switch (_mode) {
+              OrbMode.listening => ui(l.code, 'speak'),
+              OrbMode.idle => _msgs.isEmpty
+                  ? 'Il cameriere parla per primo'
+                  : 'Tocca la sfera per continuare',
+              _ => '',
+            };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            decoration: BoxDecoration(
+              color: c.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: c.withValues(alpha: 0.5)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (_mode == OrbMode.listening || _mode == OrbMode.hearing)
+                Container(
+                  width: 9,
+                  height: 9,
+                  margin: const EdgeInsets.only(right: 7),
+                  decoration:
+                      BoxDecoration(color: c, shape: BoxShape.circle),
+                ),
+              Icon(icon, size: 18, color: c),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: TextStyle(
+                      color: c,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                      fontSize: 13)),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            big,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            textDirection: _hint == null && l.rtl && _mode != OrbMode.idle
+                ? TextDirection.rtl
+                : null,
+            style: TextStyle(
+              fontSize: _live.isNotEmpty ? 22 : 18,
+              fontWeight: _live.isNotEmpty ? FontWeight.w600 : FontWeight.w500,
+              color: _live.isNotEmpty ? C.ink : (_hint != null ? C.listening : color),
+              height: 1.25,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -506,23 +679,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                         size: 190,
                         onTap: _onOrbTap,
                       ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: Text(
-                          _hint ?? _status(),
-                          key: ValueKey('${_hint ?? _status()}$_turn'),
-                          textAlign: TextAlign.center,
-                          textDirection: langOf(_lang(_turn)).rtl &&
-                                  _hint == null &&
-                                  _mode != OrbMode.idle
-                              ? TextDirection.rtl
-                              : null,
-                          style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                              color: color),
-                        ),
-                      ),
+                      _statusArea(color),
                     ],
                   ),
                 ),

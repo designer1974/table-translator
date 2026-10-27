@@ -22,6 +22,13 @@ class _SettingsPageState extends State<SettingsPage> {
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(m)));
 
+  Widget _section(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
+        child: Text(t,
+            style: const TextStyle(
+                color: C.muted, letterSpacing: 1.2, fontWeight: FontWeight.w600)),
+      );
+
   void _set(VoidCallback f) {
     setState(f);
     p.save();
@@ -145,13 +152,42 @@ class _SettingsPageState extends State<SettingsPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _section('ASCOLTO'),
             GlossCard(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Column(children: [
-                SwitchListTile(
-                  title: const Text('Leggi la traduzione ad alta voce'),
-                  value: p.autoSpeak,
-                  onChanged: (v) => _set(() => p.autoSpeak = v),
+                ListTile(
+                  title: const Text('Modalità di ascolto'),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(
+                                value: 'google',
+                                icon: Icon(Icons.bolt_rounded),
+                                label: Text('Veloce')),
+                            ButtonSegment(
+                                value: 'whisper',
+                                icon: Icon(Icons.wifi_off_rounded),
+                                label: Text('Offline')),
+                          ],
+                          selected: {p.engine},
+                          onSelectionChanged: (v) =>
+                              _set(() => p.engine = v.first),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          p.engine == 'whisper'
+                              ? 'Funziona senza internet, ma è più lenta (qualche secondo per frase).'
+                              : 'Consigliata: scrive mentre parli, risposta immediata. Serve internet.',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 ListTile(
                   title: const Text('Pausa che chiude la frase'),
@@ -174,7 +210,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 ListTile(
-                  title: const Text('Riconoscimento voce (Whisper)'),
+                  title: const Text('Qualità offline (Whisper)'),
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: SegmentedButton<String>(
@@ -219,20 +255,19 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
-                ListTile(
-                  title: const Text('Grandezza testo'),
-                  subtitle: Slider(
-                    value: p.textScale,
-                    min: 0.8,
-                    max: 1.5,
-                    divisions: 7,
-                    label: '${(p.textScale * 100).round()}%',
-                    onChanged: (v) => setState(() => p.textScale = v),
-                    onChangeEnd: (_) => p.save(),
-                  ),
+              ]),
+            ),
+            _section('VOCE'),
+            GlossCard(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(children: [
+                SwitchListTile(
+                  title: const Text('Leggi la traduzione ad alta voce'),
+                  value: p.autoSpeak,
+                  onChanged: (v) => _set(() => p.autoSpeak = v),
                 ),
                 ListTile(
-                  title: const Text('Velocità della voce'),
+                  title: Text('Velocità  ·  ${(p.rate / 0.5 * 100).round()}%'),
                   subtitle: Slider(
                     value: p.rate,
                     min: 0.3,
@@ -242,32 +277,59 @@ class _SettingsPageState extends State<SettingsPage> {
                     onChangeEnd: (_) => p.save(),
                   ),
                 ),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.only(left: 8, bottom: 8),
-              child: Text('VOCI',
-                  style: TextStyle(
-                      color: C.muted,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w600)),
-            ),
-            GlossCard(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(children: [
+                ListTile(
+                  title: Text('Tono  ·  ${p.pitch < 0.95 ? 'più basso' : p.pitch > 1.05 ? 'più alto' : 'normale'}'),
+                  subtitle: Slider(
+                    value: p.pitch,
+                    min: 0.7,
+                    max: 1.3,
+                    divisions: 6,
+                    onChanged: (v) => setState(() => p.pitch = v),
+                    onChangeEnd: (_) => p.save(),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.play_circle_fill,
+                      color: C.waiter, size: 32),
+                  title: const Text('Prova la voce'),
+                  subtitle: const Text('Ascolta come suona con queste impostazioni'),
+                  onTap: () async {
+                    widget.voice.rate = p.rate;
+                    widget.voice.pitch = p.pitch;
+                    await widget.voice.speak(
+                        'Buongiorno, benvenuti! Cosa vi porto da bere?',
+                        langOf('it'));
+                  },
+                ),
+                const Divider(height: 8),
                 for (final l in langs)
                   ListTile(
                     leading:
                         Text(l.flag, style: const TextStyle(fontSize: 26)),
-                    title: Text(l.nameIt),
+                    title: Text('Voce ${l.nameIt}'),
                     subtitle: Text((p.voices[l.code] ?? '').isEmpty
-                        ? 'Automatica'
+                        ? 'Automatica (la migliore)'
                         : 'Scelta da te'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => _voices(l),
                   ),
               ]),
+            ),
+            _section('SCHERMO'),
+            GlossCard(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: ListTile(
+                title: const Text('Grandezza testo'),
+                subtitle: Slider(
+                  value: p.textScale,
+                  min: 0.8,
+                  max: 1.5,
+                  divisions: 7,
+                  label: '${(p.textScale * 100).round()}%',
+                  onChanged: (v) => setState(() => p.textScale = v),
+                  onChangeEnd: (_) => p.save(),
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             GlossCard(

@@ -73,7 +73,7 @@ class _SetupPageState extends State<SetupPage> {
     // l'inglese per primo: serve da ponte per tutte le coppie
     final order = ['en', ...langs.map((l) => l.code).where((c) => c != 'en')];
     await Future.wait([
-      if (_wst != _St.ready) _downloadWhisper(),
+      if (_offline && _wst != _St.ready) _downloadWhisper(),
       ...order.where((c) => _st[c] != _St.ready).map((c) => _download(c)),
     ]);
   }
@@ -86,12 +86,14 @@ class _SetupPageState extends State<SetupPage> {
     if (mounted) setState(() => _st[code] = _St.missing);
   }
 
+  bool get _offline => widget.prefs?.engine == 'whisper';
   bool get _allReady =>
-      _wst == _St.ready && _st.values.every((s) => s == _St.ready);
+      (_wst == _St.ready || !_offline) &&
+      _st.values.every((s) => s == _St.ready);
   bool get _busy =>
       _wst == _St.downloading || _st.values.any((s) => s == _St.downloading);
   bool get _enoughReady =>
-      _wst == _St.ready &&
+      (_wst == _St.ready || !_offline) &&
       _st['en'] == _St.ready &&
       _st.entries.where((e) => e.value == _St.ready).length >= 2;
 
@@ -196,9 +198,11 @@ class _SetupPageState extends State<SetupPage> {
     return Column(children: [
       ListTile(
         leading: const Icon(Icons.graphic_eq_rounded, size: 30, color: C.waiter),
-        title: const Text('Riconoscimento voce',
+        title: const Text('Ascolto offline',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-        subtitle: Text('Whisper ${_stt.quality.label} · ${_stt.quality.size}'),
+        subtitle: Text(_offline
+            ? 'Whisper ${_stt.quality.label} · ${_stt.quality.size}'
+            : 'Solo per la modalità offline (facoltativo) · ${_stt.quality.size}'),
         trailing: trailing,
       ),
       if (_wst == _St.downloading)

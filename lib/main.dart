@@ -60,7 +60,9 @@ class _StartGateState extends State<StartGate> {
       missing = await Models.missing([p.waiter, p.tourist]);
       final q = SttQuality.values.firstWhere((x) => x.name == p.stt,
           orElse: () => SttQuality.balanced);
-      if (!await Stt(q).hasModel()) missing.add('whisper');
+      if (p.engine == 'whisper' && !await Stt(q).hasModel()) {
+        missing.add('whisper');
+      }
     } catch (_) {
       missing = [];
     }
