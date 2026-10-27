@@ -57,7 +57,8 @@ class _StartGateState extends State<StartGate> {
     final p = widget.prefs;
     List<String> missing;
     try {
-      missing = await Models.missing([p.waiter, p.tourist]);
+      missing = await Models.missing([p.waiter, p.tourist])
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
       missing = [];
     }

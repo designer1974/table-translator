@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'engine.dart';
 import 'langs.dart';
 import 'prefs.dart';
+import 'setup_page.dart' show buildNumber;
 import 'theme.dart';
 
 /// Impostazioni essenziali: voce donna/uomo, velocità, voce sì/no, testo sì/no.
@@ -144,6 +145,11 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ],
             const SizedBox(height: 20),
+            const Center(
+              child: Text('Devoo Translator · versione $buildNumber',
+                  style: TextStyle(color: C.muted, fontSize: 13)),
+            ),
+            const SizedBox(height: 8),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),
               child: Text(
