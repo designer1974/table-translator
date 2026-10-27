@@ -13,6 +13,8 @@ class Prefs extends ChangeNotifier {
   double textScale = 1.0;
   double rate = 0.48;
   double pitch = 1.0;
+  bool showText = true; // mostra il testo tradotto
+  double sens = 0.7; // sensibilità microfono (modalità Sensibile)
   Map<String, String> voices = {}; // lingua -> "nome|locale"
 
   static Future<Prefs> load() async {
@@ -26,7 +28,9 @@ class Prefs extends ChangeNotifier {
       ..engine = p.getString('engine') ?? 'google'
       ..textScale = p.getDouble('textScale') ?? 1.0
       ..rate = p.getDouble('rate') ?? 0.48
-      ..pitch = p.getDouble('pitch') ?? 1.0;
+      ..pitch = p.getDouble('pitch') ?? 1.0
+      ..showText = p.getBool('showText') ?? true
+      ..sens = p.getDouble('sens') ?? 0.7;
     for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
       x.voices[k.substring(6)] = p.getString(k) ?? '';
     }
@@ -44,6 +48,8 @@ class Prefs extends ChangeNotifier {
     await p.setDouble('textScale', textScale);
     await p.setDouble('rate', rate);
     await p.setDouble('pitch', pitch);
+    await p.setBool('showText', showText);
+    await p.setDouble('sens', sens);
     for (final e in voices.entries) {
       if (e.value.isEmpty) {
         await p.remove('voice_${e.key}');

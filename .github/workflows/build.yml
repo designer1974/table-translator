@@ -60,18 +60,18 @@ jobs:
 
       - name: Rinomina APK
         run: |
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk TableTranslator.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk TableTranslator-telefoni-vecchi.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk DevooTranslator.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk DevooTranslator-telefoni-vecchi.apk
           ls -la *.apk
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Table Translator build ${{ github.run_number }}
+          name: Devoo Translator build ${{ github.run_number }}
           body: |
-            **TableTranslator.apk** → per quasi tutti i telefoni (anche Huawei P30 Lite).
-            TableTranslator-telefoni-vecchi.apk → solo per telefoni molto vecchi a 32 bit.
+            **DevooTranslator.apk** → per quasi tutti i telefoni (anche Huawei P30 Lite).
+            DevooTranslator-telefoni-vecchi.apk → solo per telefoni molto vecchi a 32 bit.
           files: |
-            TableTranslator.apk
-            TableTranslator-telefoni-vecchi.apk
+            DevooTranslator.apk
+            DevooTranslator-telefoni-vecchi.apk
           make_latest: true

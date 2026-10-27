@@ -27,7 +27,7 @@ class TableTranslatorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Table Translator',
+      title: 'Devoo Translator',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
       home: StartGate(prefs: prefs),

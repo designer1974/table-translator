@@ -171,8 +171,8 @@ class _SettingsPageState extends State<SettingsPage> {
                                 label: Text('Veloce')),
                             ButtonSegment(
                                 value: 'whisper',
-                                icon: Icon(Icons.wifi_off_rounded),
-                                label: Text('Offline')),
+                                icon: Icon(Icons.hearing_rounded),
+                                label: Text('Sensibile')),
                           ],
                           selected: {p.engine},
                           onSelectionChanged: (v) =>
@@ -181,7 +181,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         const SizedBox(height: 6),
                         Text(
                           p.engine == 'whisper'
-                              ? 'Funziona senza internet, ma è più lenta (qualche secondo per frase).'
+                              ? 'Sente anche la voce bassa e a distanza, filtra rumori ed eco, accetta solo voce umana. Funziona senza internet, ma è più lenta.'
                               : 'Consigliata: scrive mentre parli, risposta immediata. Serve internet.',
                           style: const TextStyle(fontSize: 12),
                         ),
@@ -189,6 +189,27 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ),
+                if (p.engine == 'whisper')
+                  ListTile(
+                    title: Text(
+                        'Sensibilità microfono  ·  ${(p.sens * 100).round()}%'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Slider(
+                          value: p.sens,
+                          min: 0,
+                          max: 1,
+                          divisions: 10,
+                          onChanged: (v) => setState(() => p.sens = v),
+                          onChangeEnd: (_) => p.save(),
+                        ),
+                        const Text(
+                            'Più alta = sente voce bassa e lontana. Se capta troppi rumori, abbassala.',
+                            style: TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
                 ListTile(
                   title: const Text('Pausa che chiude la frase'),
                   subtitle: Column(
@@ -318,7 +339,15 @@ class _SettingsPageState extends State<SettingsPage> {
             _section('SCHERMO'),
             GlossCard(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: ListTile(
+              child: Column(children: [
+                SwitchListTile(
+                  title: const Text('Mostra il testo'),
+                  subtitle: const Text(
+                      'OFF = solo voce: niente scritte, si sente solo la traduzione'),
+                  value: p.showText,
+                  onChanged: (v) => _set(() => p.showText = v),
+                ),
+                ListTile(
                 title: const Text('Grandezza testo'),
                 subtitle: Slider(
                   value: p.textScale,
@@ -330,6 +359,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onChangeEnd: (_) => p.save(),
                 ),
               ),
+              ]),
             ),
             const SizedBox(height: 16),
             GlossCard(

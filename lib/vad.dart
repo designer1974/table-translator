@@ -29,7 +29,37 @@ class Vad {
   int _speechMs = 0;
   double level = 0; // ultimo livello (0..1) per l'animazione
 
-  double get threshold => max(_floor * 2.5, minLevel);
+  double _ratio = 2.5;
+
+  /// Sensibilità 0..1 (1 = sente anche la voce molto bassa / lontana).
+  set sensitivity(double v) {
+    final s = v.clamp(0.0, 1.0);
+    minLevel = 0.02 * pow(0.1, s).toDouble(); // 0.02 … 0.002
+    _ratio = 3.0 - s * 1.3; // 3.0 … 1.7 volte il rumore di fondo
+  }
+
+  double get threshold => max(_floor * _ratio, minLevel);
+
+  // filtro "voce umana": passa-alto ~200 Hz + passa-basso ~3,8 kHz
+  double _hpIn = 0, _hpOut = 0, _lp = 0;
+
+  /// Energia nella banda della voce (ignora rombi bassi e fruscii acuti).
+  double voiceRms(Uint8List pcm) {
+    final n = pcm.length ~/ 2;
+    if (n == 0) return 0;
+    final bd = ByteData.sublistView(pcm);
+    const a = 0.926; // passa-alto 200 Hz a 16 kHz
+    const b = 0.6; // passa-basso ~3,8 kHz a 16 kHz
+    var sum = 0.0;
+    for (var i = 0; i < n; i++) {
+      final x = bd.getInt16(i * 2, Endian.little) / 32768.0;
+      _hpOut = a * (_hpOut + x - _hpIn);
+      _hpIn = x;
+      _lp += b * (_hpOut - _lp);
+      sum += _lp * _lp;
+    }
+    return sqrt(sum / n);
+  }
 
   void reset() {
     speaking = false;
@@ -54,7 +84,7 @@ class Vad {
   /// Analizza un pezzo di audio (16 kHz mono) e dice cosa è successo.
   VadEvent feed(Uint8List pcm, {int sampleRate = 16000}) {
     final ms = (pcm.length ~/ 2) * 1000 ~/ sampleRate;
-    final r = rms(pcm);
+    final r = voiceRms(pcm);
     level = r;
     final loud = r > threshold;
 
@@ -130,4 +160,24 @@ Uint8List wavHeader(int dataLen, {int channels = 1, int rate = 16000}) {
   str(36, 'data');
   h.setUint32(40, dataLen, Endian.little);
   return h.buffer.asUint8List();
+}
+
+/// Amplifica la voce bassa: porta il picco vicino al massimo (max 20×).
+Uint8List normalizeVoice(Uint8List pcm) {
+  final n = pcm.length ~/ 2;
+  if (n == 0) return pcm;
+  final bd = ByteData.sublistView(pcm);
+  var peak = 1;
+  for (var i = 0; i < n; i++) {
+    final v = bd.getInt16(i * 2, Endian.little).abs();
+    if (v > peak) peak = v;
+  }
+  final gain = min(20.0, 29000 / peak);
+  if (gain < 1.2) return pcm;
+  final out = ByteData(n * 2);
+  for (var i = 0; i < n; i++) {
+    final v = (bd.getInt16(i * 2, Endian.little) * gain).round();
+    out.setInt16(i * 2, v.clamp(-32768, 32767).toInt(), Endian.little);
+  }
+  return out.buffer.asUint8List();
 }

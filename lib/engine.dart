@@ -303,6 +303,7 @@ extension SttQualityX on SttQuality {
 class Stt {
   final _ctrl = WhisperController();
   SttQuality quality;
+  bool _keep = true;
   Stt(this.quality);
 
   Future<String> _path(SttQuality q) => _ctrl.getPath(q.model);
@@ -345,19 +346,27 @@ class Stt {
   Future<String> transcribe(Uint8List pcm, String lang) async {
     final dir = await getTemporaryDirectory();
     final path = '${dir.path}/frase.wav';
+    final loud = normalizeVoice(pcm); // voce bassa amplificata
     final b = BytesBuilder(copy: false)
-      ..add(wavHeader(pcm.length))
-      ..add(pcm);
+      ..add(wavHeader(loud.length))
+      ..add(loud);
     await File(path).writeAsBytes(b.takeBytes(), flush: true);
-    final res = await _ctrl.transcribe(
-      model: quality.model,
-      audioPath: path,
-      lang: lang,
-      keepModelLoaded: true, // il modello resta pronto: frasi successive veloci
-      suppressNonSpeechTokens: true,
-      noContext: true,
-    );
-    final t = res?.transcription.text.trim() ?? '';
+    Future<dynamic> run(bool keep) => _ctrl.transcribe(
+          model: quality.model,
+          audioPath: path,
+          lang: lang,
+          keepModelLoaded: keep, // modello pronto: frasi successive veloci
+          suppressNonSpeechTokens: true,
+          noContext: true,
+        );
+    var res = await run(_keep);
+    if (res == null && _keep) {
+      // su alcuni telefoni il modello "parcheggiato" non riparte: ricarica
+      _keep = false;
+      await release();
+      res = await run(false);
+    }
+    final String t = res?.transcription.text.trim() ?? '';
     return isHallucination(t) ? '' : t;
   }
 

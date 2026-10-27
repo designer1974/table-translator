@@ -43,6 +43,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   final _msgs = <Msg>[];
   final _text = TextEditingController();
+  final _pages = PageController();
+  int _page = 0;
   Side _turn = Side.waiter;
   OrbMode _mode = OrbMode.idle;
   bool _running = false; // conversazione avviata
@@ -94,12 +96,12 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       ..onError = (code) {
         if (!mounted || !_running) return;
         if (code == 6 || code == 7) {
-          // nessuno ha parlato: continua ad ascoltare
-          Future.delayed(const Duration(milliseconds: 250), _listen);
+          // nessuno ha parlato: riascolta subito (senza buchi)
+          _listen();
           return;
         }
         if (code == 8 || code == 5 || code == 11) {
-          Future.delayed(const Duration(milliseconds: 700), _listen);
+          Future.delayed(const Duration(milliseconds: 300), _listen);
           return;
         }
         setState(() {
@@ -141,6 +143,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     });
     _ear.vad.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
     _g.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
+    _ear.vad.sensitivity = p.sens;
     final q = SttQuality.values
         .firstWhere((x) => x.name == p.stt, orElse: () => SttQuality.balanced);
     if (q != _stt.quality) {
@@ -318,6 +321,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     if (!mounted) return;
     setState(() {
       _msgs.add(Msg(fromSide, from, to, text, out));
+      _showLast();
       _turn = _other(fromSide); // ora tocca all'altra persona
       _mode = OrbMode.speaking;
       _live = '';
@@ -562,7 +566,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   Widget _statusArea(Color color) {
     final (icon, label, c) = _badge(color);
     final l = langOf(_lang(_turn));
-    final big = _live.isNotEmpty
+    final big = _live.isNotEmpty && p.showText
         ? _live
         : _hint ??
             switch (_mode) {
@@ -628,7 +632,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final color = _color(_turn);
-    final last = _msgs.isEmpty ? null : _msgs.last;
+    final showCards = p.showText && _msgs.isNotEmpty;
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: MilkBackground(
@@ -665,45 +669,95 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                   ],
                 ),
               ),
-              // sfera
+              // sfera: si adatta allo spazio, l'etichetta resta sempre visibile
               Expanded(
-                flex: 5,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                flex: showCards ? 5 : 1,
+                child: LayoutBuilder(builder: (ctx, c) {
+                  final statusH = showCards ? 96.0 : 130.0;
+                  final size = ((c.maxHeight - statusH) / 1.35)
+                      .clamp(90.0, 210.0)
+                      .toDouble();
+                  return Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Orb(
                         mode: _mode,
                         level: _level,
                         color: color,
                         flag: langOf(_lang(_turn)).flag,
-                        size: 190,
+                        size: size,
                         onTap: _onOrbTap,
                       ),
                       _statusArea(color),
                     ],
+                  );
+                }),
+              ),
+              // traduzioni: galleria da scorrere col dito
+              if (showCards)
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: _gallery(),
                   ),
                 ),
-              ),
-              // ultima traduzione
-              Expanded(
-                flex: 4,
-                child: last == null
-                    ? const SizedBox()
-                    : Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: GlossCard(
-                          padding: const EdgeInsets.fromLTRB(18, 14, 8, 14),
-                          child: _lastCard(last),
-                        ),
-                      ),
-              ),
               _bottomBar(color),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _gallery() {
+    final n = _msgs.length;
+    return Column(
+      children: [
+        Expanded(
+          child: PageView.builder(
+            controller: _pages,
+            itemCount: n,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: GlossCard(
+                padding: const EdgeInsets.fromLTRB(18, 14, 8, 14),
+                child: _lastCard(_msgs[i]),
+              ),
+            ),
+          ),
+        ),
+        if (n > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.chevron_left,
+                    size: 18, color: _page > 0 ? C.muted : C.border),
+                Text('${_page + 1} / $n  ·  scorri col dito',
+                    style: const TextStyle(fontSize: 12, color: C.muted)),
+                Icon(Icons.chevron_right,
+                    size: 18, color: _page < n - 1 ? C.muted : C.border),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Mostra l'ultima traduzione nella galleria.
+  void _showLast() {
+    final last = _msgs.length - 1;
+    _page = last;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_pages.hasClients) {
+        _pages.animateToPage(last,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic);
+      }
+    });
   }
 
   Widget _lastCard(Msg m) {

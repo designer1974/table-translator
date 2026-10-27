@@ -1,4 +1,4 @@
-# Table Translator
+# Devoo Translator
 
 Traduttore vocale per camerieri che lavorano con turisti. Gratis e offline.
 

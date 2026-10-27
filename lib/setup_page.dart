@@ -110,7 +110,7 @@ class _SetupPageState extends State<SetupPage> {
             children: [
               if (widget.first) ...[
                 const SizedBox(height: 12),
-                const Text('Table Translator',
+                const Text('Devoo Translator',
                     style:
                         TextStyle(fontSize: 30, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
