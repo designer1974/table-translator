@@ -24,11 +24,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Installa NDK (per Whisper)
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.13113456" > /dev/null
-
       - name: Prepara progetto Android
         run: |
           flutter create --platforms=android --org com.designer1974 --project-name table_translator .

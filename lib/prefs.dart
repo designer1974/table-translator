@@ -7,12 +7,13 @@ class Prefs extends ChangeNotifier {
   String tourist = 'en';
   bool autoSpeak = true;
   bool flip = false; // (non più usato)
-  double pauseSec = 2.0; // silenzio che chiude la frase
+  double pauseSec = 1.0; // silenzio che chiude la frase
   String stt = 'balanced'; // qualità Whisper
   String engine = 'google'; // 'google' (veloce) o 'whisper' (offline)
   double textScale = 1.0;
   double rate = 0.48;
   double pitch = 1.0;
+  bool male = false; // voce maschile
   bool showText = true; // mostra il testo tradotto
   double sens = 0.7; // sensibilità microfono (modalità Sensibile)
   Map<String, String> voices = {}; // lingua -> "nome|locale"
@@ -23,12 +24,13 @@ class Prefs extends ChangeNotifier {
       ..waiter = p.getString('waiter') ?? 'it'
       ..tourist = p.getString('tourist') ?? 'en'
       ..autoSpeak = p.getBool('autoSpeak') ?? true
-      ..pauseSec = p.getDouble('pauseSec') ?? 2.0
+      ..pauseSec = p.getDouble('pause') ?? 1.0
       ..stt = p.getString('stt') ?? 'balanced'
       ..engine = p.getString('engine') ?? 'google'
       ..textScale = p.getDouble('textScale') ?? 1.0
       ..rate = p.getDouble('rate') ?? 0.48
       ..pitch = p.getDouble('pitch') ?? 1.0
+      ..male = p.getBool('male') ?? false
       ..showText = p.getBool('showText') ?? true
       ..sens = p.getDouble('sens') ?? 0.7;
     for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
@@ -42,12 +44,13 @@ class Prefs extends ChangeNotifier {
     await p.setString('waiter', waiter);
     await p.setString('tourist', tourist);
     await p.setBool('autoSpeak', autoSpeak);
-    await p.setDouble('pauseSec', pauseSec);
+    await p.setDouble('pause', pauseSec);
     await p.setString('stt', stt);
     await p.setString('engine', engine);
     await p.setDouble('textScale', textScale);
     await p.setDouble('rate', rate);
     await p.setDouble('pitch', pitch);
+    await p.setBool('male', male);
     await p.setBool('showText', showText);
     await p.setDouble('sens', sens);
     for (final e in voices.entries) {

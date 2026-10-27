@@ -1,7 +1,9 @@
 package com.designer1974.table_translator
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -24,6 +26,17 @@ class MainActivity : FlutterActivity() {
     private var usedComponent: ComponentName? = null
     private var sink: EventChannel.EventSink? = null
     private val main = Handler(Looper.getMainLooper())
+    private var permResult: MethodChannel.Result? = null
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 77) {
+            permResult?.success(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+            permResult = null
+        }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -37,9 +50,17 @@ class MainActivity : FlutterActivity() {
         MethodChannel(messenger, "tt/stt").setMethodCallHandler { call, result ->
             when (call.method) {
                 "info" -> result.success(info())
+                "permission" -> {
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        result.success(true)
+                    } else {
+                        permResult = result
+                        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 77)
+                    }
+                }
                 "start" -> {
                     try {
-                        start(call.argument<String>("lang") ?: "it-IT")
+                        start(call.argument<String>("lang") ?: "it-IT", call.argument<String>("other"))
                         result.success(null)
                     } catch (e: Exception) {
                         result.error("STT", e.message, null)
@@ -92,7 +113,7 @@ class MainActivity : FlutterActivity() {
         return r
     }
 
-    private fun start(lang: String) {
+    private fun start(lang: String, other: String?) {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
@@ -101,8 +122,10 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L)
+            // anche l'altra lingua: il servizio Google può riconoscerla da solo
+            if (other != null) putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(other))
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
         }
         val r = ensure()
         r.cancel()

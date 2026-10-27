@@ -58,11 +58,6 @@ class _StartGateState extends State<StartGate> {
     List<String> missing;
     try {
       missing = await Models.missing([p.waiter, p.tourist]);
-      final q = SttQuality.values.firstWhere((x) => x.name == p.stt,
-          orElse: () => SttQuality.balanced);
-      if (p.engine == 'whisper' && !await Stt(q).hasModel()) {
-        missing.add('whisper');
-      }
     } catch (_) {
       missing = [];
     }
@@ -78,7 +73,6 @@ class _StartGateState extends State<StartGate> {
     }
     if (_ready == false) {
       return SetupPage(
-        first: true,
         prefs: widget.prefs,
         onDone: () => setState(() => _ready = true),
       );

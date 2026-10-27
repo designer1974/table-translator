@@ -14,7 +14,7 @@ class GoogleStt {
   bool _active = false;
 
   /// Silenzio dopo l'ultima parola che chiude la frase.
-  Duration pause = const Duration(milliseconds: 2000);
+  Duration pause = const Duration(milliseconds: 1000);
 
   void Function()? onReady;
   void Function()? onBegin;
@@ -85,12 +85,16 @@ class GoogleStt {
   Future<Map<String, dynamic>> info() async =>
       Map<String, dynamic>.from(await _m.invokeMethod('info') as Map);
 
-  Future<void> start(String locale) async {
+  /// Chiede il permesso del microfono (se manca).
+  Future<bool> permission() async =>
+      (await _m.invokeMethod<bool>('permission')) ?? false;
+
+  Future<void> start(String locale, {String? other}) async {
     attach();
     _partial = '';
     _active = true;
     _silence?.cancel();
-    await _m.invokeMethod('start', {'lang': locale});
+    await _m.invokeMethod('start', {'lang': locale, 'other': other});
   }
 
   Future<void> cancel() async {

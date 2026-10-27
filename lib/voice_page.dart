@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -35,10 +34,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   final _tr = Translator();
   final _det = Detector();
   final _voice = Voice();
-  final _ear = Ear();
-  late Stt _stt;
-  final _g = GoogleStt(); // riconoscimento veloce (predefinito)
-  bool get _fast => p.engine != 'whisper';
+  final _g = GoogleStt(); // riconoscimento vocale veloce
   String _live = ''; // testo che arriva mentre la persona parla
 
   final _msgs = <Msg>[];
@@ -55,22 +51,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _stt = Stt(SttQuality.values.firstWhere((q) => q.name == p.stt,
-        orElse: () => SttQuality.balanced));
     _voice.init();
     _applyPrefs();
     p.addListener(_applyPrefs);
-    _ear
-      ..onLevel = (v) {
-        if (mounted &&
-            (_mode == OrbMode.listening || _mode == OrbMode.hearing)) {
-          setState(() => _level = v);
-        }
-      }
-      ..onSpeechStart = () {
-        if (mounted) setState(() => _mode = OrbMode.hearing);
-      }
-      ..onUtterance = _onUtterance;
     _g
       ..onReady = () {
         if (mounted && _running) setState(() => _mode = OrbMode.listening);
@@ -115,12 +98,10 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     p.removeListener(_applyPrefs);
-    _ear.dispose();
     _g.dispose();
     _voice.stop();
     _tr.dispose();
     _det.dispose();
-    _stt.release();
     WakelockPlus.disable();
     super.dispose();
   }
@@ -141,15 +122,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         _voice.chosen[k] = {'name': parts[0], 'locale': parts[1]};
       }
     });
-    _ear.vad.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
+    _voice.male = p.male;
     _g.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
-    _ear.vad.sensitivity = p.sens;
-    final q = SttQuality.values
-        .firstWhere((x) => x.name == p.stt, orElse: () => SttQuality.balanced);
-    if (q != _stt.quality) {
-      _stt.release();
-      _stt = Stt(q);
-    }
   }
 
   String _lang(Side s) => s == Side.waiter ? p.waiter : p.tourist;
@@ -163,23 +137,14 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   // ---------------- conversazione ----------------
 
   Future<void> _start() async {
-    if (!await _ear.permission()) {
+    if (!await _g.permission()) {
       _snack('Serve il permesso del microfono');
       return;
     }
-    if (_fast) {
-      final info = await _g.info();
-      if (info['available'] != true || info['using'] == null) {
-        if (mounted) _noGoogleDialog();
-        return;
-      }
-    } else {
-      if (!await _stt.hasModel()) {
-        _snack('Scarica prima il riconoscimento offline in Impostazioni');
-        return;
-      }
-      if (!await _ear.start()) return;
-      _ear.pause();
+    final info = await _g.info();
+    if (info['available'] != true || info['using'] == null) {
+      if (mounted) _noGoogleDialog();
+      return;
     }
     WakelockPlus.enable();
     HapticFeedback.mediumImpact();
@@ -196,9 +161,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       builder: (ctx) => AlertDialog(
         title: const Text('Riconoscimento vocale non trovato'),
         content: const Text(
-          'Per la modalità veloce serve l\'app "Google" sul telefono '
-          '(dal Play Store). Puoi anche usare la modalità offline '
-          '(più lenta) in Impostazioni.',
+          'Per riconoscere la voce serve l\'app "Google" sul telefono '
+          '(gratis, dal Play Store).',
         ),
         actions: [
           TextButton(
@@ -210,7 +174,6 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   Future<void> _stop() async {
     await _g.cancel();
-    await _ear.close();
     await _voice.stop();
     WakelockPlus.disable();
     if (mounted) {
@@ -230,22 +193,15 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _level = 0;
       _live = '';
     });
-    if (_fast) {
-      _g.start(langOf(_lang(_turn)).speech).catchError((e) {
-        if (mounted) setState(() => _hint = 'Errore: $e');
-      });
-    } else {
-      _ear.resume();
-    }
+    _g
+        .start(langOf(_lang(_turn)).speech,
+            other: langOf(_lang(_other(_turn))).speech)
+        .catchError((e) {
+      if (mounted) setState(() => _hint = 'Errore: $e');
+    });
   }
 
-  void _pauseListening() {
-    if (_fast) {
-      _g.cancel();
-    } else {
-      _ear.pause();
-    }
-  }
+  void _pauseListening() => _g.cancel();
 
   /// Testo riconosciuto (modalità veloce).
   Future<void> _onText(String text) async {
@@ -256,7 +212,12 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _listen();
       return;
     }
-    await _deliver(side, text, _lang(side));
+    // riconosce la lingua dal testo: se ha parlato l'altra persona,
+    // traduce nel verso giusto senza dover toccare niente
+    var from = _lang(side);
+    final d = await _det.detect(text);
+    if (d != null && d == _lang(_other(side))) from = d;
+    await _deliver(side, text, from);
   }
 
   Future<void> _onOrbTap() async {
@@ -277,28 +238,6 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       case OrbMode.thinking:
         break;
     }
-  }
-
-  Future<void> _onUtterance(Uint8List pcm) async {
-    final side = _turn;
-    if (!mounted) return;
-    setState(() {
-      _mode = OrbMode.thinking;
-      _level = 0;
-    });
-    String text = '';
-    try {
-      text = await _stt.transcribe(pcm, _lang(side));
-    } catch (e) {
-      _snack('Errore riconoscimento: $e');
-    }
-    if (!mounted || !_running) return;
-    if (text.isEmpty) {
-      setState(() => _hint = ui(_lang(side), 'again'));
-      _listen();
-      return;
-    }
-    await _deliver(side, text, _lang(side));
   }
 
   /// Traduce, mostra, legge e passa il turno all'altra persona.
@@ -349,6 +288,23 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     final d = await _det.detect(t);
     final from = (d == p.tourist || d == p.waiter) ? d! : _lang(_turn);
     await _deliver(from == p.waiter ? Side.waiter : Side.tourist, t, from);
+  }
+
+  /// Tocca la bandiera di chi sta per parlare.
+  void _speaker(Side side) {
+    HapticFeedback.selectionClick();
+    final wasListening =
+        _running && (_mode == OrbMode.listening || _mode == OrbMode.hearing);
+    setState(() {
+      _turn = side;
+      _hint = null;
+    });
+    if (!_running) {
+      _start();
+    } else if (wasListening || _mode == OrbMode.paused) {
+      _pauseListening();
+      _listen();
+    }
   }
 
   void _swapTurn() {
@@ -572,7 +528,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
             switch (_mode) {
               OrbMode.listening => ui(l.code, 'speak'),
               OrbMode.idle => _msgs.isEmpty
-                  ? 'Il cameriere parla per primo'
+                  ? 'Tocca la bandiera di chi parla\n(tienila premuta per cambiare lingua)'
                   : 'Tocca la sfera per continuare',
               _ => '',
             };
@@ -868,7 +824,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     final color = _color(side);
     return InkWell(
       borderRadius: BorderRadius.circular(18),
-      onTap: () => _pickLang(side),
+      onTap: () => _speaker(side),
+      onLongPress: () => _pickLang(side),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
