@@ -107,6 +107,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
           _hint = sttErrorText(code);
         });
       };
+  }
 
   @override
   void dispose() {
