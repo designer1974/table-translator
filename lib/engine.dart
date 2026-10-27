@@ -69,22 +69,79 @@ class Translator {
 
 // ---------------- Rilevamento lingua ----------------
 
-class Detector {
-  final _id = LanguageIdentifier(confidenceThreshold: 0.35);
+/// Parole frequenti: aiutano con le frasi corte ("ok don't worry", "sì grazie"),
+/// dove il riconoscimento automatico da solo sbaglia spesso.
+const _common = <String, Set<String>>{
+  'en': {
+    'the', 'a', 'an', 'you', 'i', "i'm", 'is', 'are', 'was', 'be', 'do',
+    "don't", 'dont', 'does', 'yes', 'yeah', 'please', 'thank', 'thanks',
+    'okay', 'ok', 'can', 'could', 'would', 'have', 'has', 'what', 'how',
+    'much', 'many', 'we', 'my', 'your', 'of', 'to', 'and', 'it', "it's",
+    'this', 'that', 'worry', 'sorry', 'hello', 'hi', 'good', 'morning',
+    'evening', 'night', 'water', 'bill', 'check', 'table', 'menu', 'like',
+    'want', 'need', 'where', 'some', 'with', 'without', 'for', 'two',
+    'three', 'one', 'glass', 'wine', 'beer', 'coffee', 'there', 'here',
+    'just', 'very', 'nice', 'great', 'fine', 'sure', 'course', 'help',
+    'us', 'me', 'card', 'pay', 'cash', 'people', 'outside', 'inside',
+    'right', 'no', 'not', 'any', 'free', 'still', 'sparkling', 'which',
+  },
+  'it': {
+    'il', 'lo', 'la', 'gli', 'le', 'di', 'che', 'non', 'è', 'e', 'sono',
+    'per', 'un', 'una', 'uno', 'ciao', 'grazie', 'prego', 'buongiorno',
+    'buonasera', 'sì', 'si', 'vorrei', 'posso', 'puoi', 'può', 'dove',
+    'quanto', 'quanti', 'conto', 'acqua', 'tavolo', 'bene', 'molto',
+    'con', 'senza', 'del', 'della', 'dei', 'questo', 'questa', 'quello',
+    'mi', 'ti', 'ci', 'vi', 'anche', 'ma', 'perché', 'come', 'cosa',
+    'volete', 'vuole', 'avete', 'abbiamo', 'subito', 'arrivo', 'scusi',
+    'scusa', 'certo', 'va', 'tutto', 'piatto', 'vino', 'birra', 'caffè',
+    'due', 'tre', 'persone', 'fuori', 'dentro', 'naturale', 'frizzante',
+    'nel', 'al', 'alla', 'dal', 'da', 'ho', 'hai', 'siete',
+    'tranquillo', 'preoccupare', 'aiutare', 'aiutarvi', 'benvenuti',
+  },
+};
 
-  /// Restituisce il codice di una lingua supportata, oppure null.
-  Future<String?> detect(String text) async {
+class Detector {
+  final _id = LanguageIdentifier(confidenceThreshold: 0.01);
+
+  /// Sceglie tra le due lingue della conversazione quella del testo.
+  /// Se non è chiaro restituisce [fallback] (la lingua di chi aveva il turno).
+  Future<String> pick(String text, String a, String b, String fallback,
+      {String? hint}) async {
+    final score = {a: 0.0, b: 0.0};
+    if (hint != null && score.containsKey(hint)) score[hint] = 0.35;
     try {
-      final all = await _id.identifyPossibleLanguages(text);
-      for (final l in all) {
+      for (final l in await _id.identifyPossibleLanguages(text)) {
         final c = l.languageTag.split('-').first;
-        if (langs.any((x) => x.code == c)) return c;
+        if (score.containsKey(c)) score[c] = score[c]! + l.confidence;
       }
     } catch (_) {}
-    return null;
+    final words = text
+        .toLowerCase()
+        .replaceAll('’', "'")
+        .split(RegExp(r"[^a-zàèéìíòóùú']+"))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (words.isNotEmpty) {
+      for (final c in score.keys.toList()) {
+        final set = _common[c];
+        if (set == null) continue;
+        final hits = words.where(set.contains).length;
+        score[c] = score[c]! + 0.9 * hits / words.length;
+      }
+    }
+    final sa = score[a]!, sb = score[b]!;
+    if ((sa - sb).abs() < 0.08) return fallback; // incerto
+    return sa > sb ? a : b;
   }
 
   void dispose() => _id.close();
+}
+
+/// Due testi praticamente uguali (traduzione non avvenuta)?
+bool sameText(String x, String y) {
+  String n(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r"[^a-zàèéìíòóùú0-9]+"), '');
+  return n(x) == n(y);
 }
 
 // ---------------- Voce ----------------
@@ -96,44 +153,73 @@ class Voice {
   double pitch = 1.0;
   bool male = false; // voce maschile
 
+  List<Map<String, String>>? _all; // tutte le voci (lette una volta)
+  String? _ready; // configurazione già applicata
+  final _offline = <String, bool>{}; // lingua -> voce installata sul telefono
+
   Future<void> init() async {
     try {
       await _tts.awaitSpeakCompletion(true); // speak() aspetta la fine
       await _tts.setPitch(1.0);
+      // motore Google se c'è: voci migliori e installabili offline
+      final engines = await _tts.getEngines;
+      if (engines is List && engines.contains('com.google.android.tts')) {
+        await _tts.setEngine('com.google.android.tts');
+      }
     } catch (_) {}
   }
 
-  /// Tutte le voci disponibili per una lingua, le migliori per prime.
-  Future<List<Map<String, String>>> voicesFor(Lang l) async {
-    final raw = await _tts.getVoices;
-    final list = <Map<String, String>>[];
-    if (raw is List) {
-      for (final v in raw) {
-        if (v is Map) {
-          final m = v.map((k, val) => MapEntry('$k', '$val'));
-          final loc = (m['locale'] ?? '').replaceAll('_', '-').toLowerCase();
-          if (loc.startsWith(l.code)) list.add(m);
+  Future<List<Map<String, String>>> _voices() async {
+    if (_all != null) return _all!;
+    final out = <Map<String, String>>[];
+    try {
+      final raw = await _tts.getVoices;
+      if (raw is List) {
+        for (final v in raw) {
+          if (v is Map) out.add(v.map((k, val) => MapEntry('$k', '$val')));
         }
       }
-    }
+    } catch (_) {}
+    if (out.isNotEmpty) _all = out;
+    return out;
+  }
+
+  static bool _isNetwork(Map<String, String> v) {
+    final name = (v['name'] ?? '').toLowerCase();
+    final feat = (v['features'] ?? '').toLowerCase();
+    return name.contains('network') ||
+        feat.contains('networktts') ||
+        feat.contains('notinstalled') ||
+        v['network_required'] == 'true' ||
+        v['network_required'] == '1';
+  }
+
+  /// Tutte le voci per una lingua: prima quelle installate sul telefono
+  /// (parlano subito), poi le altre.
+  Future<List<Map<String, String>>> voicesFor(Lang l) async {
+    final list = (await _voices()).where((m) {
+      final loc = (m['locale'] ?? '').replaceAll('_', '-').toLowerCase();
+      return loc.startsWith(l.code);
+    }).toList();
     int score(Map<String, String> v) {
-      final name = (v['name'] ?? '').toLowerCase();
       final loc = (v['locale'] ?? '').replaceAll('_', '-').toLowerCase();
       var s = 0;
+      if (_isNetwork(v)) s -= 1000; // da internet: lenta a partire
+      if ((v['name'] ?? '').toLowerCase().contains('local')) s += 50;
       if (loc == l.tts.toLowerCase()) s += 20;
+      if (l.code == 'en' && loc == 'en-us') s += 10; // seconda scelta
       final q = int.tryParse(v['quality'] ?? '') ?? 0;
-      s += q ~/ 20; // qualità alta = punteggio alto
-      if (name.contains('network')) s -= 5; // richiede internet
-      if (name.contains('local')) s += 5;
-      if (v['network_required'] == 'true' || v['network_required'] == '1') {
-        s -= 5;
-      }
+      s += q ~/ 50;
       return s;
     }
 
     list.sort((a, b) => score(b).compareTo(score(a)));
+    _offline[l.code] = list.isNotEmpty && !_isNetwork(list.first);
     return list;
   }
+
+  /// La lingua ha una voce installata sul telefono? (null = non so)
+  bool? hasOfflineVoice(String code) => _offline[code];
 
   Future<bool> available(Lang l) async {
     try {
@@ -144,29 +230,38 @@ class Voice {
     }
   }
 
+  /// Prepara la voce in anticipo (mentre si traduce), così parla subito.
+  Future<void> prepare(Lang l) async {
+    final key = '${l.code}|$male|$rate|$pitch|${chosen[l.code]?['name']}';
+    if (_ready == key) return;
+    try {
+      Map<String, String>? v = chosen[l.code];
+      if (v == null) {
+        final best = await voicesFor(l);
+        if (best.isNotEmpty) v = pickGender(best, male);
+      }
+      if (v != null) {
+        await _tts.setVoice({'name': v['name']!, 'locale': v['locale']!});
+      } else {
+        await _tts.setLanguage(l.tts);
+      }
+      await _tts.setSpeechRate(rate);
+      await _tts.setPitch(male ? pitch * 0.85 : pitch * 1.03);
+      _ready = key;
+    } catch (_) {
+      _ready = null;
+    }
+  }
+
   Future<void> speak(String text, Lang l) async {
     if (text.trim().isEmpty) return;
     await _tts.stop();
-    await _tts.setLanguage(l.tts);
-    final v = chosen[l.code];
-    if (v != null) {
-      try {
-        await _tts.setVoice({'name': v['name']!, 'locale': v['locale']!});
-      } catch (_) {}
-    } else {
-      final best = await voicesFor(l);
-      if (best.isNotEmpty) {
-        final v = pickGender(best, male);
-        try {
-          await _tts.setVoice({'name': v['name']!, 'locale': v['locale']!});
-        } catch (_) {}
-      }
-    }
-    await _tts.setSpeechRate(rate);
-    // tono: più basso per la voce maschile
-    await _tts.setPitch(male ? pitch * 0.82 : pitch * 1.05);
+    await prepare(l);
     await _tts.speak(text);
   }
+
+  /// Dopo un cambio di impostazioni la voce va riapplicata.
+  void reset() => _ready = null;
 
   Future<void> stop() => _tts.stop();
 }
@@ -190,11 +285,15 @@ bool _has(Map<String, String> v, List<String> codes) {
 Map<String, String> pickGender(List<Map<String, String>> voices, bool male) {
   final want = male ? _maleCodes : _femaleCodes;
   final avoid = male ? _femaleCodes : _maleCodes;
-  for (final v in voices) {
-    if (_has(v, want)) return v;
-  }
-  for (final v in voices) {
-    if (!_has(v, avoid)) return v;
+  // prima le voci installate sul telefono, poi quelle da internet
+  final local = voices.where((v) => !Voice._isNetwork(v)).toList();
+  for (final group in [local, voices]) {
+    for (final v in group) {
+      if (_has(v, want)) return v;
+    }
+    for (final v in group) {
+      if (!_has(v, avoid)) return v;
+    }
   }
   return voices.first;
 }

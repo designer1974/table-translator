@@ -12,9 +12,14 @@ class Lang {
       this.tts, {this.rtl = false});
 }
 
+/// Per ora solo italiano e inglese: prima devono funzionare bene queste due.
 const langs = <Lang>[
   Lang('it', 'Italiano', 'Italiano', '🇮🇹', 'it-IT', 'it-IT'),
   Lang('en', 'English', 'Inglese', '🇬🇧', 'en-GB', 'en-GB'),
+];
+
+/// Lingue da riattivare più avanti.
+const moreLangs = <Lang>[
   Lang('fr', 'Français', 'Francese', '🇫🇷', 'fr-FR', 'fr-FR'),
   Lang('de', 'Deutsch', 'Tedesco', '🇩🇪', 'de-DE', 'de-DE'),
   Lang('es', 'Español', 'Spagnolo', '🇪🇸', 'es-ES', 'es-ES'),

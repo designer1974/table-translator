@@ -33,6 +33,12 @@ class Prefs extends ChangeNotifier {
       ..male = p.getBool('male') ?? false
       ..showText = p.getBool('showText') ?? true
       ..sens = p.getDouble('sens') ?? 0.7;
+    const ok = {'it', 'en'};
+    if (!ok.contains(x.waiter) || !ok.contains(x.tourist) || x.waiter == x.tourist) {
+      x
+        ..waiter = 'it'
+        ..tourist = 'en';
+    }
     for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
       x.voices[k.substring(6)] = p.getString(k) ?? '';
     }

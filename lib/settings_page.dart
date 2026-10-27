@@ -27,8 +27,12 @@ class _SettingsPageState extends State<SettingsPage> {
     final v = widget.voice
       ..rate = p.rate
       ..pitch = p.pitch
-      ..male = p.male;
+      ..male = p.male
+      ..reset();
     await v.speak('Buongiorno, benvenuti! Cosa vi porto da bere?', langOf('it'));
+    await v.speak('Good evening, welcome! What can I get you to drink?',
+        langOf('en'));
+    if (mounted) setState(() {});
   }
 
   @override
@@ -108,6 +112,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ]),
             ),
+            if (widget.voice.hasOfflineVoice('en') == false) ...[
+              const SizedBox(height: 16),
+              GlossCard(
+                padding: const EdgeInsets.all(16),
+                child: const Text(
+                  '⚠️ La voce inglese non è installata sul telefono: parla in '
+                  'ritardo perché la scarica ogni volta. Vai in Impostazioni '
+                  'del telefono › Sintesi vocale › Motore Google › Installa '
+                  'dati vocali › English (UK) e scaricala.',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8),

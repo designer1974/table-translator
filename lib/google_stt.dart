@@ -11,6 +11,8 @@ class GoogleStt {
   StreamSubscription? _sub;
   Timer? _silence;
   String _partial = '';
+  String? detected; // lingua sentita dal servizio (Android 14+), es. "en"
+
   bool _active = false;
 
   /// Silenzio dopo l'ultima parola che chiude la frase.
@@ -33,6 +35,8 @@ class GoogleStt {
           onReady?.call();
         case 'begin':
           onBegin?.call();
+        case 'lang':
+          detected = '${ev['tag']}'.split(RegExp('[-_]')).first.toLowerCase();
         case 'rms':
           final db = (ev['value'] as num).toDouble();
           onLevel?.call(((db + 2) / 12).clamp(0.0, 1.0));
@@ -92,6 +96,7 @@ class GoogleStt {
   Future<void> start(String locale, {String? other}) async {
     attach();
     _partial = '';
+    detected = null;
     _active = true;
     _silence?.cancel();
     await _m.invokeMethod('start', {'lang': locale, 'other': other});

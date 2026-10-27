@@ -51,7 +51,12 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _voice.init();
+    _voice.init().then((_) async {
+      // legge le voci subito e prepara quella della prima traduzione
+      await _voice.voicesFor(langOf(p.tourist));
+      await _voice.voicesFor(langOf(p.waiter));
+      await _voice.prepare(langOf(p.tourist));
+    });
     _applyPrefs();
     p.addListener(_applyPrefs);
     _g
@@ -123,6 +128,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       }
     });
     _voice.male = p.male;
+    _voice.reset();
     _g.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
   }
 
@@ -214,9 +220,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     }
     // riconosce la lingua dal testo: se ha parlato l'altra persona,
     // traduce nel verso giusto senza dover toccare niente
-    var from = _lang(side);
-    final d = await _det.detect(text);
-    if (d != null && d == _lang(_other(side))) from = d;
+    final from = await _det.pick(text, p.waiter, p.tourist, _lang(side),
+        hint: _g.detected);
     await _deliver(side, text, from);
   }
 
@@ -242,22 +247,35 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   /// Traduce, mostra, legge e passa il turno all'altra persona.
   Future<void> _deliver(Side side, String text, String from) async {
-    final to = from == p.waiter ? p.tourist : p.waiter;
-    final fromSide = from == p.waiter ? Side.waiter : Side.tourist;
+    var to = from == p.waiter ? p.tourist : p.waiter;
     setState(() {
       _mode = OrbMode.thinking;
       _hint = null;
       _live = text;
     });
+    // la voce si prepara mentre traduce: così parla subito
+    final warm = _voice.prepare(langOf(to));
     String out;
     try {
       out = await _tr.translate(text, from, to);
+      // traduzione uguale all'originale = lingua sbagliata: prova l'altro verso
+      if (sameText(out, text)) {
+        final back = await _tr.translate(text, to, from);
+        if (!sameText(back, text)) {
+          final f = from;
+          from = to;
+          to = f;
+          out = back;
+        }
+      }
     } catch (e) {
       _snack('Traduzione non riuscita: scarica le lingue in Impostazioni');
       if (_running) _listen();
       return;
     }
     if (!mounted) return;
+    final fromSide = from == p.waiter ? Side.waiter : Side.tourist;
+    await warm;
     setState(() {
       _msgs.add(Msg(fromSide, from, to, text, out));
       _showLast();
@@ -285,8 +303,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     FocusScope.of(context).unfocus();
     _pauseListening();
     // rileva la lingua scritta: decide la direzione
-    final d = await _det.detect(t);
-    final from = (d == p.tourist || d == p.waiter) ? d! : _lang(_turn);
+    final from = await _det.pick(t, p.waiter, p.tourist, _lang(_turn));
     await _deliver(from == p.waiter ? Side.waiter : Side.tourist, t, from);
   }
 

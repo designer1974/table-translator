@@ -124,6 +124,12 @@ class MainActivity : FlutterActivity() {
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             // anche l'altra lingua: il servizio Google può riconoscerla da solo
             if (other != null) putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf(other))
+            // Android 14+: riconosce da solo quale delle due lingue si parla
+            val both = arrayListOf(lang).apply { if (other != null) add(other) }
+            putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true)
+            putStringArrayListExtra("android.speech.extra.LANGUAGE_DETECTION_ALLOWED_LANGUAGES", both)
+            putExtra("android.speech.extra.ENABLE_LANGUAGE_SWITCH", "balanced")
+            putStringArrayListExtra("android.speech.extra.LANGUAGE_SWITCH_ALLOWED_LANGUAGES", both)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
         }
@@ -153,5 +159,9 @@ class MainActivity : FlutterActivity() {
         override fun onPartialResults(partialResults: Bundle?) =
             emit("partial", mapOf("text" to firstText(partialResults)))
         override fun onEvent(eventType: Int, params: Bundle?) {}
+        override fun onLanguageDetection(results: Bundle) {
+            val tag = results.getString("detected_language") ?: return
+            emit("lang", mapOf("tag" to tag))
+        }
     }
 }
