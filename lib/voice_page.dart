@@ -90,7 +90,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
           });
         }
       }
-      ..onFinal = (t) => _onText(t)
+      ..onFinal = _onText
       ..onError = (code) {
         if (!mounted || !_running) return;
         if (code == 6 || code == 7) {
