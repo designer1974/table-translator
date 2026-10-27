@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'conversation.dart';
 import 'engine.dart';
 import 'prefs.dart';
 import 'setup_page.dart';
 import 'theme.dart';
+import 'voice_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,6 +58,9 @@ class _StartGateState extends State<StartGate> {
     List<String> missing;
     try {
       missing = await Models.missing([p.waiter, p.tourist]);
+      final q = SttQuality.values.firstWhere((x) => x.name == p.stt,
+          orElse: () => SttQuality.balanced);
+      if (!await Stt(q).hasModel()) missing.add('whisper');
     } catch (_) {
       missing = [];
     }
@@ -74,9 +77,10 @@ class _StartGateState extends State<StartGate> {
     if (_ready == false) {
       return SetupPage(
         first: true,
+        prefs: widget.prefs,
         onDone: () => setState(() => _ready = true),
       );
     }
-    return ConversationPage(prefs: widget.prefs);
+    return VoicePage(prefs: widget.prefs);
   }
 }

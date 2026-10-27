@@ -18,6 +18,10 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   Prefs get p => widget.prefs;
 
+  void _snack(String m) => ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(m)));
+
   void _set(VoidCallback f) {
     setState(f);
     p.save();
@@ -149,12 +153,71 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: p.autoSpeak,
                   onChanged: (v) => _set(() => p.autoSpeak = v),
                 ),
-                SwitchListTile(
-                  title: const Text('Capovolgi la parte del turista'),
-                  subtitle: const Text(
-                      'Per appoggiare il telefono sul tavolo tra voi due'),
-                  value: p.flip,
-                  onChanged: (v) => _set(() => p.flip = v),
+                ListTile(
+                  title: const Text('Pausa che chiude la frase'),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Slider(
+                        value: p.pauseSec,
+                        min: 1.0,
+                        max: 3.0,
+                        divisions: 8,
+                        label: '${p.pauseSec.toStringAsFixed(2)} s',
+                        onChanged: (v) => setState(() => p.pauseSec = v),
+                        onChangeEnd: (_) => p.save(),
+                      ),
+                      Text(
+                          'Quando smetti di parlare per ${p.pauseSec.toStringAsFixed(1)} secondi, traduce da solo.',
+                          style: const TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+                ListTile(
+                  title: const Text('Riconoscimento voce (Whisper)'),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: SegmentedButton<String>(
+                      segments: [
+                        for (final q in SttQuality.values)
+                          ButtonSegment(value: q.name, label: Text(q.label)),
+                      ],
+                      selected: {p.stt},
+                      onSelectionChanged: (v) async {
+                        final q = SttQuality.values.byName(v.first);
+                        if (!await Stt(q).hasModel()) {
+                          if (!mounted) return;
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text('Qualità ${q.label}'),
+                              content: Text(
+                                  'Serve scaricare ${q.size} (una volta sola). '
+                                  'Più precisa = più lenta.'),
+                              actions: [
+                                TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Annulla')),
+                                FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Scarica')),
+                              ],
+                            ),
+                          );
+                          if (ok != true || !mounted) return;
+                          _snack('Scarico ${q.size}… attendi');
+                          try {
+                            await Stt(q).download((_) {});
+                          } catch (e) {
+                            _snack('Download non riuscito');
+                            return;
+                          }
+                          _snack('Pronto');
+                        }
+                        _set(() => p.stt = q.name);
+                      },
+                    ),
+                  ),
                 ),
                 ListTile(
                   title: const Text('Grandezza testo'),
@@ -215,14 +278,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: const Text('Scarica o elimina i dizionari'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const SetupPage())),
+                    MaterialPageRoute(builder: (_) => SetupPage(prefs: p))),
               ),
             ),
             const SizedBox(height: 16),
             const Text(
-              'Il riconoscimento della voce usa Google sul telefono: per usarlo '
-              'senza internet scarica le lingue in Impostazioni › Google › '
-              'Riconoscimento vocale offline.',
+              'Tutto funziona sul telefono: voce→testo con Whisper, '
+              'traduzione con i dizionari offline, voce con la sintesi vocale. '
+              'Gratis, senza crediti.',
               style: TextStyle(color: C.muted, fontSize: 13),
             ),
           ],

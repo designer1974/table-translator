@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 
 import 'engine.dart';
 import 'langs.dart';
+import 'prefs.dart';
 import 'theme.dart';
 
 /// Scarica i dizionari di traduzione (una volta sola, poi funziona offline).
 class SetupPage extends StatefulWidget {
   final bool first;
   final VoidCallback? onDone;
-  const SetupPage({super.key, this.first = false, this.onDone});
+  final Prefs? prefs;
+  const SetupPage({super.key, this.first = false, this.onDone, this.prefs});
 
   @override
   State<SetupPage> createState() => _SetupPageState();
@@ -18,6 +20,11 @@ enum _St { checking, missing, downloading, ready, error }
 
 class _SetupPageState extends State<SetupPage> {
   final _st = <String, _St>{for (final l in langs) l.code: _St.checking};
+  _St _wst = _St.checking; // riconoscimento voce (Whisper)
+  double _wprog = 0;
+  late final Stt _stt = Stt(SttQuality.values.firstWhere(
+      (x) => x.name == widget.prefs?.stt,
+      orElse: () => SttQuality.balanced));
 
   @override
   void initState() {
@@ -25,7 +32,24 @@ class _SetupPageState extends State<SetupPage> {
     _refresh();
   }
 
+  Future<void> _downloadWhisper() async {
+    setState(() {
+      _wst = _St.downloading;
+      _wprog = 0;
+    });
+    try {
+      await _stt.download((v) {
+        if (mounted) setState(() => _wprog = v);
+      });
+      if (mounted) setState(() => _wst = _St.ready);
+    } catch (_) {
+      if (mounted) setState(() => _wst = _St.error);
+    }
+  }
+
   Future<void> _refresh() async {
+    final w = await _stt.hasModel();
+    if (mounted) setState(() => _wst = w ? _St.ready : _St.missing);
     for (final l in langs) {
       bool ok = false;
       try {
@@ -48,9 +72,10 @@ class _SetupPageState extends State<SetupPage> {
   Future<void> _downloadAll() async {
     // l'inglese per primo: serve da ponte per tutte le coppie
     final order = ['en', ...langs.map((l) => l.code).where((c) => c != 'en')];
-    await Future.wait(order
-        .where((c) => _st[c] != _St.ready)
-        .map((c) => _download(c)));
+    await Future.wait([
+      if (_wst != _St.ready) _downloadWhisper(),
+      ...order.where((c) => _st[c] != _St.ready).map((c) => _download(c)),
+    ]);
   }
 
   Future<void> _delete(String code) async {
@@ -61,9 +86,12 @@ class _SetupPageState extends State<SetupPage> {
     if (mounted) setState(() => _st[code] = _St.missing);
   }
 
-  bool get _allReady => _st.values.every((s) => s == _St.ready);
-  bool get _busy => _st.values.any((s) => s == _St.downloading);
+  bool get _allReady =>
+      _wst == _St.ready && _st.values.every((s) => s == _St.ready);
+  bool get _busy =>
+      _wst == _St.downloading || _st.values.any((s) => s == _St.downloading);
   bool get _enoughReady =>
+      _wst == _St.ready &&
       _st['en'] == _St.ready &&
       _st.entries.where((e) => e.value == _St.ready).length >= 2;
 
@@ -85,12 +113,17 @@ class _SetupPageState extends State<SetupPage> {
                         TextStyle(fontSize: 30, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 const Text(
-                  'Scarica le lingue una volta sola (circa 30 MB ciascuna). '
-                  'Dopo la traduzione funziona gratis, anche senza internet.',
+                  'Scarica una volta sola il riconoscimento voce e le lingue. '
+                  'Dopo funziona tutto gratis, anche senza internet.',
                   style: TextStyle(fontSize: 16, color: C.muted),
                 ),
                 const SizedBox(height: 20),
               ],
+              GlossCard(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: _whisperRow(),
+              ),
+              const SizedBox(height: 12),
               GlossCard(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Column(
@@ -133,6 +166,47 @@ class _SetupPageState extends State<SetupPage> {
         ),
       ),
     );
+  }
+
+  Widget _whisperRow() {
+    Widget trailing;
+    switch (_wst) {
+      case _St.checking:
+        trailing = const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5));
+      case _St.downloading:
+        trailing = SizedBox(
+          width: 56,
+          child: Text('${(_wprog * 100).round()}%',
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontWeight: FontWeight.w600)),
+        );
+      case _St.ready:
+        trailing = const Icon(Icons.check_circle, color: Color(0xFF2E8B57));
+      case _St.missing:
+      case _St.error:
+        trailing = TextButton.icon(
+          onPressed: _downloadWhisper,
+          icon: Icon(_wst == _St.error ? Icons.refresh : Icons.download),
+          label: Text(_wst == _St.error ? 'Riprova' : 'Scarica'),
+        );
+    }
+    return Column(children: [
+      ListTile(
+        leading: const Icon(Icons.graphic_eq_rounded, size: 30, color: C.waiter),
+        title: const Text('Riconoscimento voce',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        subtitle: Text('Whisper ${_stt.quality.label} · ${_stt.quality.size}'),
+        trailing: trailing,
+      ),
+      if (_wst == _St.downloading)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: LinearProgressIndicator(value: _wprog > 0 ? _wprog : null),
+        ),
+    ]);
   }
 
   Widget _row(Lang l) {

@@ -6,7 +6,9 @@ class Prefs extends ChangeNotifier {
   String waiter = 'it';
   String tourist = 'en';
   bool autoSpeak = true;
-  bool flip = true; // metà del turista capovolta
+  bool flip = false; // (non più usato)
+  double pauseSec = 2.0; // silenzio che chiude la frase
+  String stt = 'balanced'; // qualità Whisper
   double textScale = 1.0;
   double rate = 0.48;
   Map<String, String> voices = {}; // lingua -> "nome|locale"
@@ -17,7 +19,8 @@ class Prefs extends ChangeNotifier {
       ..waiter = p.getString('waiter') ?? 'it'
       ..tourist = p.getString('tourist') ?? 'en'
       ..autoSpeak = p.getBool('autoSpeak') ?? true
-      ..flip = p.getBool('flip') ?? true
+      ..pauseSec = p.getDouble('pauseSec') ?? 2.0
+      ..stt = p.getString('stt') ?? 'balanced'
       ..textScale = p.getDouble('textScale') ?? 1.0
       ..rate = p.getDouble('rate') ?? 0.48;
     for (final k in p.getKeys().where((k) => k.startsWith('voice_'))) {
@@ -31,7 +34,8 @@ class Prefs extends ChangeNotifier {
     await p.setString('waiter', waiter);
     await p.setString('tourist', tourist);
     await p.setBool('autoSpeak', autoSpeak);
-    await p.setBool('flip', flip);
+    await p.setDouble('pauseSec', pauseSec);
+    await p.setString('stt', stt);
     await p.setDouble('textScale', textScale);
     await p.setDouble('rate', rate);
     for (final e in voices.entries) {

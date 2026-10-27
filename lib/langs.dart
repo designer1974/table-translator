@@ -26,12 +26,12 @@ Lang langOf(String code) =>
 
 /// Testi dell'interfaccia mostrati al turista nella sua lingua.
 const touristUi = <String, Map<String, String>>{
-  'it': {'speak': 'Tocca e parla', 'listening': 'Sto ascoltando…', 'you': 'Hai detto'},
-  'en': {'speak': 'Tap and speak', 'listening': 'Listening…', 'you': 'You said'},
-  'fr': {'speak': 'Touchez et parlez', 'listening': 'J\'écoute…', 'you': 'Vous avez dit'},
-  'de': {'speak': 'Tippen und sprechen', 'listening': 'Ich höre zu…', 'you': 'Sie sagten'},
-  'es': {'speak': 'Toca y habla', 'listening': 'Escuchando…', 'you': 'Has dicho'},
-  'ar': {'speak': 'اضغط وتحدث', 'listening': '…أستمع', 'you': 'قلت'},
+  'it': {'again': 'Non ho capito, ripeti', 'speak': 'Parla in italiano', 'listening': 'Sto ascoltando…', 'you': 'Hai detto'},
+  'en': {'again': 'Sorry, please repeat', 'speak': 'Speak in English', 'listening': 'Listening…', 'you': 'You said'},
+  'fr': {'again': 'Pardon, répétez', 'speak': 'Parlez en français', 'listening': 'J\'écoute…', 'you': 'Vous avez dit'},
+  'de': {'again': 'Bitte wiederholen', 'speak': 'Bitte auf Deutsch sprechen', 'listening': 'Ich höre zu…', 'you': 'Sie sagten'},
+  'es': {'again': 'Perdón, repite', 'speak': 'Habla en español', 'listening': 'Escuchando…', 'you': 'Has dicho'},
+  'ar': {'again': 'لم أفهم، أعد من فضلك', 'speak': 'تحدث بالعربية', 'listening': '…أستمع', 'you': 'قلت'},
 };
 
 String ui(String lang, String key) =>

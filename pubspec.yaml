@@ -9,7 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  speech_to_text: any
+  whisper_ggml: any
+  record: any
+  path_provider: any
+  wakelock_plus: any
   google_mlkit_translation: any
   google_mlkit_language_id: any
   flutter_tts: any

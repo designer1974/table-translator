@@ -1,15 +1,20 @@
-// Motore: riconoscimento vocale (Android), traduzione offline (ML Kit),
-// rilevamento lingua (ML Kit) e voce (sintesi vocale del telefono).
+// Motore: microfono + rilevatore di pausa, voce→testo (Whisper, offline),
+// traduzione offline (ML Kit), rilevamento lingua del testo (ML Kit)
+// e voce (sintesi vocale del telefono).
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_mlkit_language_id/google_mlkit_language_id.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:whisper_ggml/whisper_ggml.dart';
 
 import 'langs.dart';
+import 'vad.dart';
 
 TranslateLanguage mlLang(String code) => switch (code) {
       'it' => TranslateLanguage.italian,
@@ -89,126 +94,6 @@ class Detector {
   void dispose() => _id.close();
 }
 
-// ---------------- Riconoscimento vocale ----------------
-
-class SpeechListener {
-  final _stt = SpeechToText();
-  bool ready = false;
-  String? error;
-  List<LocaleName> _locales = [];
-
-  void Function(String text, bool isFinal)? onText;
-  void Function(double level)? onLevel;
-  void Function()? onDone;
-  void Function(String error)? onError;
-
-  bool _gotFinal = false;
-  String _last = '';
-  bool _active = false;
-
-  Future<bool> init() async {
-    if (ready) return true;
-    try {
-      ready = await _stt.initialize(
-        onError: (e) {
-          if (!_active) return;
-          final msg = e.errorMsg;
-          // "no match" = non ha capito: chiudiamo senza testo
-          _finish();
-          if (msg != 'error_no_match' && msg != 'error_speech_timeout') {
-            onError?.call(msg);
-          }
-        },
-        onStatus: (s) {
-          if ((s == 'done' || s == 'notListening') && _active) {
-            // nessun risultato finale: usiamo l'ultimo parziale
-            Future.delayed(const Duration(milliseconds: 400), () {
-              if (_active && !_gotFinal) _finish();
-            });
-          }
-        },
-      );
-      if (ready) _locales = await _stt.locales();
-    } catch (e) {
-      error = '$e';
-      ready = false;
-    }
-    return ready;
-  }
-
-  String _localeFor(Lang l) {
-    String norm(String s) => s.replaceAll('_', '-').toLowerCase();
-    final want = norm(l.speech);
-    for (final x in _locales) {
-      if (norm(x.localeId) == want) return x.localeId;
-    }
-    for (final x in _locales) {
-      if (norm(x.localeId).startsWith('${l.code}-') ||
-          norm(x.localeId) == l.code) {
-        return x.localeId;
-      }
-    }
-    return l.speech;
-  }
-
-  bool get isListening => _active;
-
-  Future<void> start(Lang lang) async {
-    if (!await init()) {
-      onError?.call(error ?? 'Riconoscimento vocale non disponibile');
-      return;
-    }
-    if (_stt.isListening) await _stt.cancel();
-    _gotFinal = false;
-    _last = '';
-    _active = true;
-    await _stt.listen(
-      localeId: _localeFor(lang),
-      listenFor: const Duration(seconds: 45),
-      pauseFor: const Duration(seconds: 3),
-      onSoundLevelChange: (v) => onLevel?.call(v),
-      listenOptions: SpeechListenOptions(
-        partialResults: true,
-        listenMode: ListenMode.dictation,
-        cancelOnError: true,
-      ),
-      onResult: (SpeechRecognitionResult r) {
-        if (!_active) return;
-        _last = r.recognizedWords;
-        if (r.finalResult) {
-          _gotFinal = true;
-          onText?.call(_last, true);
-          _active = false;
-          onDone?.call();
-        } else {
-          onText?.call(_last, false);
-        }
-      },
-    );
-  }
-
-  /// Ferma l'ascolto: il testo finora sentito viene tradotto.
-  Future<void> stop() async {
-    if (!_active) return;
-    await _stt.stop();
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (_active && !_gotFinal) _finish();
-    });
-  }
-
-  Future<void> cancel() async {
-    _active = false;
-    await _stt.cancel();
-  }
-
-  void _finish() {
-    if (!_active) return;
-    _active = false;
-    if (_last.trim().isNotEmpty) onText?.call(_last, true);
-    onDone?.call();
-  }
-}
-
 // ---------------- Voce ----------------
 
 class Voice {
@@ -218,7 +103,7 @@ class Voice {
 
   Future<void> init() async {
     try {
-      await _tts.awaitSpeakCompletion(false);
+      await _tts.awaitSpeakCompletion(true); // speak() aspetta la fine
       await _tts.setPitch(1.0);
     } catch (_) {}
   }
@@ -287,4 +172,194 @@ class Voice {
   }
 
   Future<void> stop() => _tts.stop();
+}
+
+// ---------------- Microfono + pausa automatica ----------------
+
+class Ear {
+  final _rec = AudioRecorder();
+  StreamSubscription<Uint8List>? _sub;
+  final vad = Vad();
+  final _pre = <Uint8List>[]; // ~0,5 s prima dell'inizio, per non tagliare
+  int _preBytes = 0;
+  final _buf = BytesBuilder(copy: false);
+  bool _paused = true;
+
+  void Function(double level)? onLevel;
+  void Function()? onSpeechStart;
+  void Function(Uint8List pcm)? onUtterance;
+
+  bool get open => _sub != null;
+  bool get listening => open && !_paused;
+
+  Future<bool> start() async {
+    if (_sub == null) {
+      if (!await _rec.hasPermission()) return false;
+      final stream = await _rec.startStream(const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: 16000,
+        numChannels: 1,
+        autoGain: true,
+        echoCancel: true,
+        noiseSuppress: true,
+      ));
+      _sub = stream.listen(_onData);
+    }
+    resume();
+    return true;
+  }
+
+  /// Ignora l'audio (mentre traduce o parla la voce).
+  void pause() {
+    _paused = true;
+    vad.reset();
+    _buf.clear();
+    onLevel?.call(0);
+  }
+
+  void resume() {
+    vad.reset();
+    _buf.clear();
+    _pre.clear();
+    _preBytes = 0;
+    _paused = false;
+  }
+
+  void _onData(Uint8List d) {
+    if (_paused) return;
+    final ev = vad.feed(d);
+    onLevel?.call(vad.level);
+    if (vad.speaking || ev == VadEvent.speechEnd || ev == VadEvent.tooLong) {
+      if (ev == VadEvent.speechStart) {
+        for (final p in _pre) {
+          _buf.add(p);
+        }
+        _pre.clear();
+        _preBytes = 0;
+        onSpeechStart?.call();
+      }
+      _buf.add(d);
+      if (ev == VadEvent.speechEnd || ev == VadEvent.tooLong) {
+        var pcm = _buf.takeBytes();
+        if (ev == VadEvent.speechEnd) {
+          // toglie la pausa finale (lascia 0,3 s)
+          final cutBytes = ((vad.pause.inMilliseconds - 300) * 32).clamp(0, pcm.length).toInt();
+          pcm = Uint8List.sublistView(pcm, 0, pcm.length - cutBytes);
+        }
+        _paused = true; // il chiamante deciderà quando riascoltare
+        onLevel?.call(0);
+        onUtterance?.call(pcm);
+      }
+    } else {
+      _pre.add(d);
+      _preBytes += d.length;
+      while (_preBytes > 16000 && _pre.length > 1) {
+        _preBytes -= _pre.removeAt(0).length;
+      }
+    }
+  }
+
+  Future<void> close() async {
+    _paused = true;
+    await _sub?.cancel();
+    _sub = null;
+    try {
+      await _rec.stop();
+    } catch (_) {}
+  }
+
+  Future<void> dispose() async {
+    await close();
+    await _rec.dispose();
+  }
+}
+
+// ---------------- Voce → testo (Whisper sul telefono) ----------------
+
+enum SttQuality { fast, balanced, precise }
+
+extension SttQualityX on SttQuality {
+  WhisperModel get model => switch (this) {
+        SttQuality.fast => WhisperModel.tiny,
+        SttQuality.balanced => WhisperModel.base,
+        SttQuality.precise => WhisperModel.small,
+      };
+  String get label => switch (this) {
+        SttQuality.fast => 'Veloce',
+        SttQuality.balanced => 'Bilanciata',
+        SttQuality.precise => 'Precisa',
+      };
+  String get size => switch (this) {
+        SttQuality.fast => '75 MB',
+        SttQuality.balanced => '142 MB',
+        SttQuality.precise => '466 MB',
+      };
+}
+
+class Stt {
+  final _ctrl = WhisperController();
+  SttQuality quality;
+  Stt(this.quality);
+
+  Future<String> _path(SttQuality q) => _ctrl.getPath(q.model);
+
+  Future<bool> hasModel([SttQuality? q]) async =>
+      File(await _path(q ?? quality)).existsSync();
+
+  /// Scarica il modello (una volta sola) con avanzamento 0..1.
+  Future<void> download(void Function(double) progress, [SttQuality? q]) async {
+    final qq = q ?? quality;
+    final path = await _path(qq);
+    if (File(path).existsSync()) return;
+    await Directory(File(path).parent.path).create(recursive: true);
+    final tmp = File('$path.part');
+    final client = HttpClient();
+    try {
+      final res = await (await client.getUrl(qq.model.modelUri)).close();
+      if (res.statusCode != 200) {
+        throw HttpException('download non riuscito (${res.statusCode})');
+      }
+      final total = res.contentLength;
+      var got = 0;
+      final sink = tmp.openWrite();
+      await for (final c in res) {
+        sink.add(c);
+        got += c.length;
+        if (total > 0) progress(got / total);
+      }
+      await sink.close();
+      await tmp.rename(path);
+    } catch (_) {
+      if (tmp.existsSync()) await tmp.delete();
+      rethrow;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Trascrive PCM 16 kHz mono nella lingua [lang].
+  Future<String> transcribe(Uint8List pcm, String lang) async {
+    final dir = await getTemporaryDirectory();
+    final path = '${dir.path}/frase.wav';
+    final b = BytesBuilder(copy: false)
+      ..add(wavHeader(pcm.length))
+      ..add(pcm);
+    await File(path).writeAsBytes(b.takeBytes(), flush: true);
+    final res = await _ctrl.transcribe(
+      model: quality.model,
+      audioPath: path,
+      lang: lang,
+      keepModelLoaded: true, // il modello resta pronto: frasi successive veloci
+      suppressNonSpeechTokens: true,
+      noContext: true,
+    );
+    final t = res?.transcription.text.trim() ?? '';
+    return isHallucination(t) ? '' : t;
+  }
+
+  Future<void> release() async {
+    try {
+      await _ctrl.releaseModel();
+    } catch (_) {}
+  }
 }
