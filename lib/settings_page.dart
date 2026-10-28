@@ -44,18 +44,23 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       return;
     }
-    setState(() {
+    // la chiave si salva subito; poi la proviamo
+    _set(() {
+      p.geminiKey = k;
       _testing = true;
-      _keyMsg = 'Controllo la chiave…';
+      _keyMsg = 'Chiave salvata. Controllo che funzioni…';
     });
+    final t = Stopwatch()..start();
+    final g = Gemini()..key = k;
     try {
-      await (Gemini()..key = k).test();
-      _set(() {
-        p.geminiKey = k;
-        _keyMsg = '✅ Chiave valida: interprete AI attivo';
-      });
+      await g.test();
+      final s = (t.elapsedMilliseconds / 1000).toStringAsFixed(1);
+      setState(() => _keyMsg =
+          '✅ Funziona: Google risponde in $s s. Interprete AI attivo');
+    } on GeminiError catch (e) {
+      setState(() => _keyMsg = '❌ ${e.message}');
     } catch (e) {
-      setState(() => _keyMsg = '❌ $e');
+      setState(() => _keyMsg = '❌ Errore: $e');
     }
     if (mounted) setState(() => _testing = false);
   }

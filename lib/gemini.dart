@@ -1,6 +1,7 @@
 // Interprete con l'intelligenza artificiale di Google (Gemini):
 // ascolta l'audio, capisce da solo la lingua, trascrive e traduce.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -127,20 +128,44 @@ Reply only with the JSON object.''';
     return b.isEmpty ? null : b.toString();
   }
 
+  /// Modello che ha risposto per ultimo.
+  String get model => models[_model];
+
   Future<Map> _post(Map body) async {
     if (key.trim().isEmpty) throw GeminiError('Manca la chiave Gemini');
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..idleTimeout = const Duration(seconds: 30);
+    final bytes = utf8.encode(jsonEncode(body));
+    var timeouts = 0;
     try {
       while (true) {
         final model = models[_model];
-        final req = await client.postUrl(Uri.parse(
-            'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent'));
-        req.headers
-          ..set('content-type', 'application/json')
-          ..set('x-goog-api-key', key.trim());
-        req.add(utf8.encode(jsonEncode(body)));
-        final res = await req.close().timeout(const Duration(seconds: 20));
-        final txt = await res.transform(utf8.decoder).join();
+        late final HttpClientResponse res;
+        late final String txt;
+        try {
+          final req = await client.postUrl(Uri.parse(
+              'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent'));
+          req.headers
+            ..set('content-type', 'application/json; charset=utf-8')
+            ..set('x-goog-api-key', key.trim());
+          req.contentLength = bytes.length; // niente invio "a pezzi"
+          req.add(bytes);
+          res = await req.close().timeout(const Duration(seconds: 15));
+          txt = await res
+              .transform(utf8.decoder)
+              .join()
+              .timeout(const Duration(seconds: 15));
+        } on TimeoutException {
+          // nessuna risposta: prova l'altro modello, poi rinuncia
+          timeouts++;
+          if (timeouts >= models.length) {
+            throw GeminiError(
+                'Google non risponde: controlla internet e riprova');
+          }
+          _model = (_model + 1) % models.length;
+          continue;
+        }
         if (res.statusCode == 200) return jsonDecode(txt) as Map;
         // modello non disponibile: prova il successivo
         if ((res.statusCode == 404 || res.statusCode == 400 && txt.contains('model')) &&
