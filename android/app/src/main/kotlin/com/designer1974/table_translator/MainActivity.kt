@@ -1,6 +1,11 @@
 package com.designer1974.table_translator
 
 import android.Manifest
+import android.app.DownloadManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.core.content.FileProvider
+import java.io.File
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -66,6 +71,10 @@ class MainActivity : FlutterActivity() {
                         result.error("STT", e.message, null)
                     }
                 }
+                "update" -> {
+                    try { update(call.argument<String>("url")!!); result.success(null) }
+                    catch (e: Exception) { result.error("UPD", e.message, null) }
+                }
                 "stop" -> { recognizer?.stopListening(); result.success(null) }
                 "cancel" -> { recognizer?.cancel(); result.success(null) }
                 else -> result.notImplemented()
@@ -77,6 +86,53 @@ class MainActivity : FlutterActivity() {
         try { recognizer?.destroy() } catch (_: Exception) {}
         recognizer = null
         super.onDestroy()
+    }
+
+    /** Scarica la nuova versione e apre l'installazione (come un aggiornamento). */
+    private fun update(url: String) {
+        val dir = File(getExternalFilesDir(null), "updates").apply { mkdirs() }
+        val file = File(dir, "DevooTranslator.apk")
+        file.delete()
+        val dm = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val id = dm.enqueue(
+            DownloadManager.Request(Uri.parse(url))
+                .setTitle("Devoo Translator")
+                .setDescription("Aggiornamento")
+                .setDestinationUri(Uri.fromFile(file))
+        )
+        val poll = object : Runnable {
+            override fun run() {
+                dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
+                    if (!c.moveToFirst()) { emit("update", mapOf("state" to "fail")); return }
+                    val st = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    val done = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                    val tot = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    when (st) {
+                        DownloadManager.STATUS_SUCCESSFUL -> { emit("update", mapOf("state" to "install")); install(file) }
+                        DownloadManager.STATUS_FAILED -> emit("update", mapOf("state" to "fail"))
+                        else -> {
+                            emit("update", mapOf("state" to "progress", "value" to if (tot > 0) done.toDouble() / tot else 0.0))
+                            main.postDelayed(this, 400)
+                        }
+                    }
+                }
+            }
+        }
+        main.postDelayed(poll, 300)
+    }
+
+    private fun install(file: File) {
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            // la prima volta Android chiede di permettere l'installazione da questa app
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            emit("update", mapOf("state" to "permission"))
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+        startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
     }
 
     private fun emit(type: String, extra: Map<String, Any?> = emptyMap()) {

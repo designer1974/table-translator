@@ -11,6 +11,7 @@ import 'orb.dart';
 import 'prefs.dart';
 import 'settings_page.dart';
 import 'theme.dart';
+import 'updater.dart';
 
 enum Side { waiter, tourist }
 
@@ -49,6 +50,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   bool _running = false; // conversazione avviata
   double _level = 0;
   String? _hint; // messaggio sotto la sfera (es. "Non ho capito")
+  Update? _upd; // versione nuova disponibile
+  String? _updState; // null, progress, install, permission, fail
+  double _updVal = 0;
 
   @override
   void initState() {
@@ -62,6 +66,18 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     });
     _applyPrefs();
     p.addListener(_applyPrefs);
+    _g.attach();
+    GoogleStt.onUpdate = (st, v) {
+      if (mounted) {
+        setState(() {
+          _updState = st;
+          _updVal = v;
+        });
+      }
+    };
+    Updater.check().then((u) {
+      if (mounted && u != null) setState(() => _upd = u);
+    });
     _g
       ..onReady = () {
         if (mounted && _running) setState(() => _mode = OrbMode.listening);
@@ -516,7 +532,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
             switch (_mode) {
               OrbMode.listening => ui(l.code, 'speak'),
               OrbMode.idle => _msgs.isEmpty
-                  ? 'Tocca la bandiera di chi parla\n(tienila premuta per cambiare lingua)'
+                  ? 'Tocca la bandiera di chi parla\nTocca ▾ per scegliere la lingua'
                   : 'Tocca la sfera per continuare',
               _ => '',
             };
@@ -606,6 +622,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                   ],
                 ),
               ),
+              if (_upd != null) _updateBanner(),
               const SizedBox(height: 12),
               // le due lingue
               Padding(
@@ -659,6 +676,62 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
               _bottomBar(color),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _updateBanner() {
+    final u = _upd!;
+    final (text, busy) = switch (_updState) {
+      'progress' => ('Scarico la versione ${u.build}… ${(_updVal * 100).round()}%', true),
+      'install' => ('Conferma l\'installazione', false),
+      'permission' => ('Consenti "Installa app" e poi tocca Aggiorna', false),
+      'fail' => ('Download non riuscito: riprova', false),
+      _ => ('Nuova versione ${u.build} disponibile', false),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Material(
+        color: C.waiter,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+          child: Row(children: [
+            const Icon(Icons.system_update_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(text,
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600))),
+            if (busy)
+              Padding(
+                padding: const EdgeInsets.all(10),
+                child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                        value: _updVal > 0 ? _updVal : null,
+                        strokeWidth: 3,
+                        color: Colors.white)),
+              )
+            else
+              TextButton(
+                style: TextButton.styleFrom(
+                    backgroundColor: Colors.white, foregroundColor: C.waiter),
+                onPressed: () {
+                  setState(() {
+                    _updState = 'progress';
+                    _updVal = 0;
+                  });
+                  Updater.install(u).catchError((_) {
+                    if (mounted) setState(() => _updState = 'fail');
+                  });
+                },
+                child: const Text('Aggiorna',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
+          ]),
         ),
       ),
     );
@@ -845,6 +918,15 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                       fontSize: 16,
                       fontWeight: FontWeight.w700,
                       color: active ? color : C.ink)),
+            ),
+            // tocca la freccia per scegliere un'altra lingua
+            InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => _pickLang(side),
+              child: const Padding(
+                padding: EdgeInsets.only(left: 2),
+                child: Icon(Icons.expand_more_rounded, color: C.muted, size: 26),
+              ),
             ),
           ],
         ),

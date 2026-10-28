@@ -27,8 +27,15 @@ class GoogleStt {
 
   bool get active => _active;
 
+  /// Stato dell'aggiornamento: progress / install / permission / fail.
+  static void Function(String state, double value)? onUpdate;
+
   void attach() {
     _sub ??= _e.receiveBroadcastStream().listen((ev) {
+      if (ev is Map && ev['type'] == 'update') {
+        onUpdate?.call('${ev['state']}', (ev['value'] as num?)?.toDouble() ?? 0);
+        return;
+      }
       if (ev is! Map || !_active) return;
       switch (ev['type']) {
         case 'ready':

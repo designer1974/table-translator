@@ -31,6 +31,11 @@ jobs:
           for f in android/app/build.gradle.kts android/app/build.gradle; do
             [ -f "$f" ] && sed -i -E 's/minSdk( =|Version)? *flutter\.minSdkVersion/minSdk = 24/' "$f" && grep -n "minSdk" "$f" || true
           done
+          printf '\ndependencies {\n    implementation("androidx.core:core-ktx:1.13.1")\n}\n' >> android/app/build.gradle.kts
+
+      # Firma sempre uguale: ogni versione si installa sopra la precedente
+      - name: Firma fissa
+        run: mkdir -p ~/.android && cp android/devoo.keystore ~/.android/debug.keystore
 
       - name: Dipendenze
         run: |
