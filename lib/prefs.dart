@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'langs.dart';
+
 /// Impostazioni salvate sul telefono.
 class Prefs extends ChangeNotifier {
   String waiter = 'it';
@@ -14,6 +16,7 @@ class Prefs extends ChangeNotifier {
   double rate = 0.52;
   double pitch = 1.0;
   bool male = false; // voce maschile
+  String geminiKey = ''; // chiave dell'interprete AI
   bool showText = true; // mostra il testo tradotto
   double sens = 0.7; // sensibilità microfono (modalità Sensibile)
   Map<String, String> voices = {}; // lingua -> "nome|locale"
@@ -31,9 +34,12 @@ class Prefs extends ChangeNotifier {
       ..rate = p.getDouble('rate') ?? 0.52
       ..pitch = p.getDouble('pitch') ?? 1.0
       ..male = p.getBool('male') ?? false
+      ..geminiKey = p.getString('geminiKey') ?? ''
       ..showText = p.getBool('showText') ?? true
       ..sens = p.getDouble('sens') ?? 0.7;
-    const ok = {'it', 'en', 'es', 'ar'};
+    if (x.waiter == 'ar') x.waiter = 'ary';
+    if (x.tourist == 'ar') x.tourist = 'ary';
+    final ok = allLangs.map((l) => l.code).toSet();
     if (!ok.contains(x.waiter) || !ok.contains(x.tourist) || x.waiter == x.tourist) {
       x
         ..waiter = 'it'
@@ -57,6 +63,7 @@ class Prefs extends ChangeNotifier {
     await p.setDouble('rate', rate);
     await p.setDouble('pitch', pitch);
     await p.setBool('male', male);
+    await p.setString('geminiKey', geminiKey.trim());
     await p.setBool('showText', showText);
     await p.setDouble('sens', sens);
     for (final e in voices.entries) {

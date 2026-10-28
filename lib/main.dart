@@ -55,6 +55,11 @@ class _StartGateState extends State<StartGate> {
 
   Future<void> _check() async {
     final p = widget.prefs;
+    if (p.geminiKey.trim().isNotEmpty) {
+      // con l'interprete AI non servono lingue scaricate
+      if (mounted) setState(() => _ready = true);
+      return;
+    }
     List<String> missing;
     try {
       missing = await Models.missing([p.waiter, p.tourist])

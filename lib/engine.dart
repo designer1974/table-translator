@@ -15,7 +15,23 @@ TranslateLanguage mlLang(String code) => switch (code) {
       'fr' => TranslateLanguage.french,
       'de' => TranslateLanguage.german,
       'es' => TranslateLanguage.spanish,
-      'ar' => TranslateLanguage.arabic,
+      'ar' || 'ary' => TranslateLanguage.arabic,
+      'pt' => TranslateLanguage.portuguese,
+      'ro' => TranslateLanguage.romanian,
+      'ru' => TranslateLanguage.russian,
+      'uk' => TranslateLanguage.ukrainian,
+      'pl' => TranslateLanguage.polish,
+      'nl' => TranslateLanguage.dutch,
+      'tr' => TranslateLanguage.turkish,
+      'zh' => TranslateLanguage.chinese,
+      'ja' => TranslateLanguage.japanese,
+      'ko' => TranslateLanguage.korean,
+      'hi' => TranslateLanguage.hindi,
+      'ur' => TranslateLanguage.urdu,
+      'bn' => TranslateLanguage.bengali,
+      'fa' => TranslateLanguage.persian,
+      'el' => TranslateLanguage.greek,
+      'sq' => TranslateLanguage.albanian,
       _ => TranslateLanguage.english,
     };
 
@@ -120,17 +136,19 @@ class Detector {
       {String? hint}) async {
     final score = {a: 0.0, b: 0.0};
     // scrittura araba: è la darija (l'altra lingua usa le lettere latine)
-    if (score.containsKey('ar')) {
+    if (score.containsKey('ary') || score.containsKey('ar')) {
+      final ar = score.containsKey('ary') ? 'ary' : 'ar';
       final arab = RegExp(r'[\u0600-\u06FF]').allMatches(text).length;
       final latin = RegExp(r'[A-Za-zÀ-ÿ]').allMatches(text).length;
-      if (arab > latin) return 'ar';
-      if (latin > 0 && arab == 0) return a == 'ar' ? b : a;
+      if (arab > latin) return ar;
+      if (latin > 0 && arab == 0) return a == ar ? b : a;
     }
     if (hint != null && score.containsKey(hint)) score[hint] = 0.35;
     try {
       for (final l in await _id.identifyPossibleLanguages(text)) {
         final c = l.languageTag.split('-').first;
-        if (score.containsKey(c)) score[c] = score[c]! + l.confidence;
+        final k = c == 'ar' && score.containsKey('ary') ? 'ary' : c;
+        if (score.containsKey(k)) score[k] = score[k]! + l.confidence;
       }
     } catch (_) {}
     final words = text
@@ -217,7 +235,7 @@ class Voice {
   Future<List<Map<String, String>>> voicesFor(Lang l) async {
     final list = (await _voices()).where((m) {
       final loc = (m['locale'] ?? '').replaceAll('_', '-').toLowerCase();
-      return loc.startsWith(l.code);
+      return loc.startsWith(l.tts.split('-').first.toLowerCase());
     }).toList();
     int score(Map<String, String> v) {
       final loc = (v['locale'] ?? '').replaceAll('_', '-').toLowerCase();

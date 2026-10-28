@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import 'ear.dart';
 import 'engine.dart';
+import 'gemini.dart';
+import 'vad.dart';
 import 'google_stt.dart';
 import 'langs.dart';
 import 'orb.dart';
@@ -35,7 +39,11 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   final _tr = Translator();
   final _det = Detector();
   final _voice = Voice();
-  final _g = GoogleStt(); // riconoscimento vocale veloce
+  final _g = GoogleStt(); // riconoscimento vocale veloce (senza AI)
+  final _ear = Ear(); // microfono sempre acceso (con AI)
+  final _ai = Gemini();
+  bool get _aiMode => p.geminiKey.trim().isNotEmpty;
+  String? _speakTo; // lingua che la voce sta leggendo
   String _live = ''; // testo che arriva mentre la persona parla
   String _liveTr = ''; // la sua traduzione, in diretta
   String _trKey = ''; // "da>a|testo" dell'ultima traduzione in diretta
@@ -75,6 +83,21 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         });
       }
     };
+    _ear
+      ..onLevel = (v) {
+        if (mounted &&
+            (_mode == OrbMode.listening || _mode == OrbMode.hearing)) {
+          setState(() => _level = v);
+        }
+      }
+      ..onSpeechStart = () {
+        if (mounted && _running) setState(() => _mode = OrbMode.hearing);
+      }
+      ..onUtterance = _onAudio;
+    // parte da solo: niente da toccare
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_running) _start();
+    });
     Updater.check().then((u) {
       if (mounted && u != null) setState(() => _upd = u);
     });
@@ -124,6 +147,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     p.removeListener(_applyPrefs);
     _g.dispose();
+    _ear.dispose();
     _voice.stop();
     _tr.dispose();
     _det.dispose();
@@ -135,6 +159,8 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState s) {
     // app in secondo piano: ferma il microfono
     if (s == AppLifecycleState.paused && _running) _stop();
+    // tornando nell'app riparte da solo
+    if (s == AppLifecycleState.resumed && !_running && mounted) _start();
   }
 
   void _applyPrefs() {
@@ -150,6 +176,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     _voice.male = p.male;
     _voice.reset();
     _g.pause = Duration(milliseconds: (p.pauseSec * 1000).round());
+    _ear.vad.pause =
+        Duration(milliseconds: (p.pauseSec * 1000).round().clamp(500, 2000));
+    _ai.key = p.geminiKey;
   }
 
   String _lang(Side s) => s == Side.waiter ? p.waiter : p.tourist;
@@ -165,6 +194,20 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
   Future<void> _start() async {
     if (!await _g.permission()) {
       _snack('Serve il permesso del microfono');
+      return;
+    }
+    if (_aiMode) {
+      if (!await _ear.start()) {
+        _snack('Serve il permesso del microfono');
+        return;
+      }
+      _ear.pause();
+      WakelockPlus.enable();
+      setState(() {
+        _running = true;
+        _hint = null;
+      });
+      _listen();
       return;
     }
     final info = await _g.info();
@@ -200,6 +243,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
 
   Future<void> _stop() async {
     await _g.cancel();
+    await _ear.close();
     await _voice.stop();
     WakelockPlus.disable();
     if (mounted) {
@@ -221,6 +265,10 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       _liveTr = '';
       _trKey = '';
     });
+    if (_aiMode) {
+      _ear.resume();
+      return;
+    }
     _g
         .start(langOf(_lang(_turn)).speech,
             other: langOf(_lang(_other(_turn))).speech)
@@ -229,7 +277,57 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     });
   }
 
-  void _pauseListening() => _g.cancel();
+  void _pauseListening() {
+    if (_aiMode) {
+      _ear.pause();
+    } else {
+      _g.cancel();
+    }
+  }
+
+  /// Interprete AI: arriva una frase intera, in qualsiasi lingua.
+  Future<void> _onAudio(Uint8List pcm) async {
+    if (!mounted || !_running) return;
+    if (pcm.length < 16000 * 2 * 0.3) {
+      _listen(); // troppo corta: un rumore
+      return;
+    }
+    setState(() {
+      _mode = OrbMode.thinking;
+      _hint = null;
+    });
+    final norm = normalizeVoice(pcm);
+    final wav = BytesBuilder(copy: false)
+      ..add(wavHeader(norm.length))
+      ..add(norm);
+    await _interpret(() => _ai.audio(wav.takeBytes(), p.waiter, p.tourist));
+  }
+
+  Future<void> _interpret(Future<Interpretation?> Function() ask) async {
+    Interpretation? r;
+    try {
+      r = await ask();
+    } on GeminiError catch (e) {
+      if (mounted) setState(() => _hint = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _hint = 'Errore: $e');
+    }
+    if (!mounted) return;
+    if (r == null) {
+      if (_running) _listen();
+      return;
+    }
+    // la lingua dell'altra persona si impara da sola
+    if (r.lang != p.waiter && r.lang != p.tourist) {
+      p.tourist = r.lang;
+      p.save();
+    }
+    var to = r.to;
+    if (to != p.waiter && to != p.tourist) {
+      to = r.lang == p.waiter ? p.tourist : p.waiter;
+    }
+    await _present(r.lang, to, r.text, r.translation);
+  }
 
   /// Traduce mentre la persona parla: alla fine la traduzione è già pronta.
   Future<void> _translateLive(String t) async {
@@ -316,20 +414,28 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       return;
     }
     if (!mounted) return;
-    final fromSide = from == p.waiter ? Side.waiter : Side.tourist;
     await warm;
+    await _present(from, to, text, out);
+  }
+
+  /// Mostra la traduzione, la legge e torna ad ascoltare.
+  Future<void> _present(String from, String to, String text, String out) async {
+    final fromSide = from == p.waiter ? Side.waiter : Side.tourist;
     setState(() {
       _msgs.add(Msg(fromSide, from, to, text, out));
       _showLast();
       _turn = _other(fromSide); // ora tocca all'altra persona
       _mode = OrbMode.speaking;
       _live = '';
+      _hint = null;
+      _speakTo = to;
     });
     if (p.autoSpeak) {
       try {
         await _voice.speak(out, langOf(to));
       } catch (_) {}
     }
+    _speakTo = null;
     if (!mounted) return;
     if (_running) {
       _listen();
@@ -344,6 +450,11 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     _text.clear();
     FocusScope.of(context).unfocus();
     _pauseListening();
+    if (_aiMode) {
+      setState(() => _mode = OrbMode.thinking);
+      await _interpret(() => _ai.text(t, p.waiter, p.tourist));
+      return;
+    }
     // rileva la lingua scritta: decide la direzione
     final from = await _det.pick(t, p.waiter, p.tourist, _lang(_turn));
     await _deliver(from == p.waiter ? Side.waiter : Side.tourist, t, from);
@@ -396,7 +507,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
             crossAxisSpacing: 12,
             childAspectRatio: 1.05,
             children: [
-              for (final l in langs)
+              for (final l in (_aiMode ? allLangs : langs))
                 InkWell(
                   borderRadius: BorderRadius.circular(22),
                   onTap: () => Navigator.pop(ctx, l.code),
@@ -435,6 +546,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     }
     await p.save();
     setState(() {});
+    if (_aiMode) return; // con l'AI non serve scaricare niente
     final missing = await Models.missing([p.waiter, p.tourist]);
     if (missing.isNotEmpty && mounted) {
       _snack('Scarico ${missing.map((c) => langOf(c).nameIt).join(', ')}…');
@@ -505,7 +617,10 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => SettingsPage(prefs: p, voice: _voice)),
     );
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _start();
+    }
   }
 
   // ---------------- interfaccia ----------------
@@ -515,9 +630,9 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
     final l = langOf(_lang(_turn));
     return switch (_mode) {
       OrbMode.idle => (Icons.play_arrow_rounded, 'TOCCA PER INIZIARE', C.muted),
-      OrbMode.listening => (Icons.mic_rounded, 'IN ASCOLTO · ${l.nameIt.toUpperCase()}', C.listening),
+      OrbMode.listening => (Icons.mic_rounded, _aiMode ? 'IN ASCOLTO · TUTTE LE LINGUE' : 'IN ASCOLTO · ${l.nameIt.toUpperCase()}', C.listening),
       OrbMode.hearing => (Icons.graphic_eq_rounded, 'TI SENTO…', C.listening),
-      OrbMode.thinking => (Icons.translate_rounded, 'TRADUCO…', color),
+      OrbMode.thinking => (Icons.translate_rounded, _aiMode ? 'CAPISCO E TRADUCO…' : 'TRADUCO…', color),
       OrbMode.speaking => (Icons.volume_up_rounded, 'LEGGO LA TRADUZIONE', color),
       OrbMode.paused => (Icons.pause_rounded, 'IN PAUSA · TOCCA LA SFERA', C.muted),
     };
@@ -530,9 +645,13 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
         ? _live
         : _hint ??
             switch (_mode) {
-              OrbMode.listening => ui(l.code, 'speak'),
+              OrbMode.listening => _aiMode
+                  ? 'Parla pure, in qualsiasi lingua'
+                  : ui(l.code, 'speak'),
               OrbMode.idle => _msgs.isEmpty
-                  ? 'Tocca la bandiera di chi parla\nTocca ▾ per scegliere la lingua'
+                  ? (_aiMode
+                      ? 'Tocca la sfera per ascoltare'
+                      : 'Tocca la bandiera di chi parla\nTocca ▾ per scegliere la lingua')
                   : 'Tocca la sfera per continuare',
               _ => '',
             };
@@ -623,6 +742,7 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                 ),
               ),
               if (_upd != null) _updateBanner(),
+              if (!_aiMode) _aiBanner(),
               const SizedBox(height: 12),
               // le due lingue
               Padding(
@@ -655,7 +775,11 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
                         mode: _mode,
                         level: _level,
                         color: color,
-                        flag: langOf(_lang(_turn)).flag,
+                        flag: !_aiMode
+                            ? langOf(_lang(_turn)).flag
+                            : _speakTo != null
+                                ? langOf(_speakTo!).flag
+                                : '🌍',
                         size: size,
                         onTap: _onOrbTap,
                       ),
@@ -680,6 +804,32 @@ class _VoicePageState extends State<VoicePage> with WidgetsBindingObserver {
       ),
     );
   }
+
+  Widget _aiBanner() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: _openSettings,
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Row(children: [
+                Icon(Icons.auto_awesome_rounded, color: C.tourist),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Attiva l\'interprete AI: capisce meglio la voce, tutte le '
+                    'lingue e la darija vera. Tocca qui',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
 
   Widget _updateBanner() {
     final u = _upd!;

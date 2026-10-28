@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   wakelock_plus: any
+  record: any
   google_mlkit_translation: any
   google_mlkit_language_id: any
   flutter_tts: any

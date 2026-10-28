@@ -71,6 +71,13 @@ class MainActivity : FlutterActivity() {
                         result.error("STT", e.message, null)
                     }
                 }
+                "open" -> {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(call.argument<String>("url")!!))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(true)
+                    } catch (e: Exception) { result.success(false) }
+                }
                 "update" -> {
                     try { update(call.argument<String>("url")!!); result.success(null) }
                     catch (e: Exception) { result.error("UPD", e.message, null) }

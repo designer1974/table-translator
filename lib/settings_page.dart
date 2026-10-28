@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:flutter/services.dart';
+
 import 'engine.dart';
+import 'gemini.dart';
 import 'langs.dart';
 import 'prefs.dart';
 import 'setup_page.dart' show buildNumber;
@@ -20,11 +23,114 @@ const _sample = {
   'it': 'Ciao! Come posso aiutarti?',
   'en': 'Hello! How can I help you?',
   'es': '¡Hola! ¿Cómo puedo ayudarte?',
-  'ar': 'السلام! كيفاش نقدر نعاونك؟',
+  'ary': 'السلام! كيفاش نقدر نعاونك؟',
 };
 
 class _SettingsPageState extends State<SettingsPage> {
   Prefs get p => widget.prefs;
+  late final _key = TextEditingController(text: p.geminiKey);
+  String? _keyMsg;
+  bool _testing = false;
+
+  static const _ch = MethodChannel('tt/stt');
+
+  Future<void> _saveKey() async {
+    final k = _key.text.trim();
+    FocusScope.of(context).unfocus();
+    if (k.isEmpty) {
+      _set(() {
+        p.geminiKey = '';
+        _keyMsg = 'Interprete AI spento';
+      });
+      return;
+    }
+    setState(() {
+      _testing = true;
+      _keyMsg = 'Controllo la chiave…';
+    });
+    try {
+      await (Gemini()..key = k).test();
+      _set(() {
+        p.geminiKey = k;
+        _keyMsg = '✅ Chiave valida: interprete AI attivo';
+      });
+    } catch (e) {
+      setState(() => _keyMsg = '❌ $e');
+    }
+    if (mounted) setState(() => _testing = false);
+  }
+
+  Widget _aiCard() => GlossCard(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.auto_awesome_rounded, color: C.tourist),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Interprete AI (Gemini)',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ),
+              if (p.geminiKey.isNotEmpty)
+                const Text('ATTIVO',
+                    style: TextStyle(
+                        color: Colors.green, fontWeight: FontWeight.w800)),
+            ]),
+            const SizedBox(height: 8),
+            const Text(
+              'Ascolta sempre, riconosce da solo la lingua di chi parla '
+              '(anche la darija) e traduce in modo naturale. Serve internet.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '1. Tocca "Crea la chiave gratis" ed entra con il tuo account Google\n'
+              '2. Premi "Create API key" e copia la chiave\n'
+              '3. Incollala qui sotto e premi Salva',
+              style: TextStyle(fontSize: 14, color: C.muted),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => _ch.invokeMethod(
+                  'open', {'url': 'https://aistudio.google.com/apikey'}),
+              icon: const Icon(Icons.open_in_new_rounded),
+              label: const Text('Crea la chiave gratis'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _key,
+              obscureText: p.geminiKey.isNotEmpty,
+              decoration: InputDecoration(
+                hintText: 'Incolla qui la chiave (AIza…)',
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: FilledButton(
+                onPressed: _testing ? null : _saveKey,
+                child: const Text('Salva'),
+              ),
+            ),
+            if (_keyMsg != null) ...[
+              const SizedBox(height: 8),
+              Text(_keyMsg!, style: const TextStyle(fontSize: 14)),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'Con il piano gratuito Google può usare le conversazioni per '
+              'migliorare i suoi servizi e c\'è un limite di richieste al minuto.',
+              style: TextStyle(fontSize: 12, color: C.muted),
+            ),
+          ],
+        ),
+      );
 
   void _set(VoidCallback f) {
     setState(f);
@@ -51,6 +157,8 @@ class _SettingsPageState extends State<SettingsPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            _aiCard(),
+            const SizedBox(height: 16),
             GlossCard(
               padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
               child: Column(
@@ -139,7 +247,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   'telefono: parla in ritardo perché la scarica ogni volta. Vai '
                   'in Impostazioni del telefono › Sintesi vocale › Motore Google '
                   '› Installa dati vocali e scarica '
-                  '${p.tourist == 'ar' ? 'Arabo' : langOf(p.tourist).nameIt}.',
+                  '${p.tourist == 'ary' ? 'Arabo' : langOf(p.tourist).nameIt}.',
                   style: TextStyle(fontSize: 14),
                 ),
               ),
