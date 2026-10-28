@@ -32,6 +32,19 @@ jobs:
             [ -f "$f" ] && sed -i -E 's/minSdk( =|Version)? *flutter\.minSdkVersion/minSdk = 24/' "$f" && grep -n "minSdk" "$f" || true
           done
           printf '\ndependencies {\n    implementation("androidx.core:core-ktx:1.13.1")\n}\n' >> android/app/build.gradle.kts
+          cat >> android/app/build.gradle.kts <<'KTS'
+
+          android {
+              signingConfigs {
+                  getByName("debug") {
+                      storeFile = file("../devoo.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
+          }
+          KTS
 
       # Firma sempre uguale: ogni versione si installa sopra la precedente
       - name: Firma fissa
