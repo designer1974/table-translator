@@ -15,33 +15,46 @@ class Update {
 
 class Updater {
   static const _m = MethodChannel('tt/stt');
-  static const _api =
-      'https://api.github.com/repos/designer1974/table-translator/releases/latest';
+  // le app si scaricano da «devoo-apps» (pubblico); il progetto col codice può essere privato
+  static const _sources = [
+    ('designer1974/devoo-apps', 'translator-build-'),
+    ('designer1974/table-translator', 'build-'),
+  ];
 
   static int get current => int.tryParse(buildNumber) ?? 0;
 
   /// Versione più recente, se è più nuova di quella installata.
   static Future<Update?> check() async {
     if (current == 0) return null;
-    final c = HttpClient()..connectionTimeout = const Duration(seconds: 8);
-    try {
-      final req = await c.getUrl(Uri.parse(_api));
-      req.headers.set('Accept', 'application/vnd.github+json');
-      final res = await req.close().timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) return null;
-      final j = jsonDecode(await res.transform(utf8.decoder).join()) as Map;
-      final n = int.tryParse('${j['tag_name']}'.replaceAll(RegExp(r'\D'), ''));
-      if (n == null || n <= current) return null;
-      for (final a in (j['assets'] as List)) {
-        if (a['name'] == 'DevooTranslator.apk') {
-          return Update(n, a['browser_download_url'] as String);
+    Update? best;
+    for (final (repo, prefix) in _sources) {
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      try {
+        final req = await c.getUrl(Uri.parse('https://api.github.com/repos/$repo/releases?per_page=20'));
+        req.headers.set('Accept', 'application/vnd.github+json');
+        req.headers.set('User-Agent', 'DevooTranslator');
+        final res = await req.close().timeout(const Duration(seconds: 10));
+        if (res.statusCode != 200) continue;
+        final list = jsonDecode(await res.transform(utf8.decoder).join());
+        if (list is! List) continue;
+        for (final j in list) {
+          if (j is! Map) continue;
+          final tag = '${j['tag_name']}';
+          if (!tag.startsWith(prefix)) continue;
+          final n = int.tryParse(tag.substring(prefix.length));
+          if (n == null || n <= current || (best != null && n <= best.build)) continue;
+          for (final a in (j['assets'] as List? ?? const [])) {
+            if (a is Map && a['name'] == 'DevooTranslator.apk') {
+              best = Update(n, '${a['browser_download_url']}');
+            }
+          }
         }
+      } catch (_) {
+      } finally {
+        c.close();
       }
-    } catch (_) {
-    } finally {
-      c.close();
     }
-    return null;
+    return best;
   }
 
   static Future<void> install(Update u) =>
